@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 10 步：使用 pgvector 执行数据库侧 Top-K 向量检索（FEAT-010）**。
+当前完成 **第 11 步：固定检索评测集与模型对照基线（EVAL-001）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -24,9 +24,10 @@
 - Qwen 适配器支持最多 20 条自动分批、响应顺序恢复、维度校验、上游错误脱敏，并在缺少 Key/Base URL 时明确返回 503。
 - 已完成真实 Qwen 闭环验证：3 个 Child Chunk 成功生成 1024 维向量，中文查询 Top-1 命中正确章节并返回 Parent 上下文；详细数据见 `CHANGELOG.md` 的 VERIFY-001。
 - PostgreSQL 使用原生 `vector` 列保存向量，为 Qwen 1024 维和本地基线 256 维分别建立部分 HNSW 余弦索引；JVM 每次只接收 Top-K 命中，不再加载全部候选向量。
+- 已提供版本化检索语料、6 条固定中文查询和评测 API，自动计算 Recall@K、MRR@K、HitRate@K、P50/P95 延迟与逐用例排名；首份 Qwen/本地对照结果见 `evaluation/reports/EVAL-001-retrieval-baseline.md`。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：37 个，全部通过。
+- 当前自动化测试：40 个，全部通过。
 
 本地验证：
 
@@ -67,6 +68,7 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 - 查询分块：`GET http://localhost:8080/api/v1/documents/{documentId}/chunks?type=CHILD&page=0&size=50`
 - 重建向量：`POST http://localhost:8080/api/v1/documents/{documentId}/embeddings/rebuild`
 - 向量检索：`POST http://localhost:8080/api/v1/search`
+- 固定检索评测：`POST http://localhost:8080/api/v1/evaluations/retrieval/run`
 - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
 - OpenAPI JSON：`http://localhost:8080/v3/api-docs`
 
@@ -80,7 +82,7 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：Qwen 调用需要用户自己的阿里云百炼凭证并产生外部 API 费用；目前已完成单文档真实调用与 pgvector 检索验证，但尚未通过固定问答集评估整体检索质量，也没有进行并发压测。HNSW 是近似检索，需要在更大语料上调节参数并测量 Recall@K；自定义模型或维度虽然能执行数据库侧精确排序，但需要新增对应的部分索引才能获得 HNSW 加速。下一步将建立固定检索评测集，比较 Qwen 与本地基线的 Recall@K、MRR、P95 延迟和成本。
+当前限制：首版评测集只有 1 篇文档、3 个 Child Chunk 和 6 个查询，只能作为回归框架与小样本模型对照，不能代表生产准确率；P95 也只是 6 次顺序请求的观测值，不是并发压测结果。Qwen 调用需要用户自己的阿里云百炼凭证并产生费用，当前 Provider 尚未采集供应商 Token 用量和估算成本。下一步将扩展多文档困难样本，并实现 BM25 + Vector + RRF，通过同一数据集验证混合检索能否修复本地模型的失败案例。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

@@ -1,5 +1,6 @@
 package com.opsmind.common.api;
 
+import com.opsmind.evaluation.domain.EvaluationException;
 import com.opsmind.knowledge.document.domain.DocumentException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -11,6 +12,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DocumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleDocumentException(DocumentException exception) {
+        return ResponseEntity.status(exception.status())
+                .body(ApiResponse.failure(exception.code(), exception.getMessage()));
+    }
+
+    @ExceptionHandler(EvaluationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleEvaluationException(EvaluationException exception) {
         return ResponseEntity.status(exception.status())
                 .body(ApiResponse.failure(exception.code(), exception.getMessage()));
     }
