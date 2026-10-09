@@ -14,5 +14,9 @@ public record ApiResponse<T>(
     public static <T> ApiResponse<T> success(T data) {
         return new ApiResponse<>(SUCCESS_CODE, SUCCESS_MESSAGE, data, Instant.now());
     }
+
+    public static <T> ApiResponse<T> failure(String code, String message) {
+        return new ApiResponse<>(code, message, null, Instant.now());
+    }
 }
 
