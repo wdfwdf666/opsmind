@@ -7,5 +7,5 @@ public interface ChunkEmbeddingRepository {
 
     void replaceAll(UUID documentId, String model, List<ChunkEmbedding> embeddings);
 
-    List<EmbeddedChunk> findCandidates(String model, UUID documentId);
+    NearestChunkSearch findNearest(String model, double[] queryVector, UUID documentId, int limit);
 }

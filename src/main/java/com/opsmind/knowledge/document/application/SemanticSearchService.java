@@ -3,13 +3,13 @@ package com.opsmind.knowledge.document.application;
 import com.opsmind.knowledge.document.config.EmbeddingProperties;
 import com.opsmind.knowledge.document.domain.ChunkEmbeddingRepository;
 import com.opsmind.knowledge.document.domain.DocumentException;
-import com.opsmind.knowledge.document.domain.EmbeddedChunk;
+import com.opsmind.knowledge.document.domain.NearestChunkSearch;
+import com.opsmind.knowledge.document.domain.ScoredEmbeddedChunk;
 import com.opsmind.knowledge.document.domain.SemanticSearchHit;
 import com.opsmind.knowledge.document.domain.SemanticSearchResult;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,15 +41,11 @@ public class SemanticSearchService {
                     HttpStatus.BAD_REQUEST);
         }
         double[] queryVector = embeddingProvider.embed(List.of(normalizedQuery)).getFirst();
-        List<EmbeddedChunk> candidates = embeddingRepository.findCandidates(embeddingProvider.model(), documentId);
-        List<SemanticSearchHit> hits = candidates.stream()
-                .map(candidate -> toHit(candidate, cosine(queryVector, candidate.vector())))
-                .sorted(Comparator.comparingDouble(SemanticSearchHit::score).reversed()
-                        .thenComparing(hit -> hit.chunkId().toString()))
-                .limit(topK)
-                .toList();
+        NearestChunkSearch nearest = embeddingRepository.findNearest(
+                embeddingProvider.model(), queryVector, documentId, topK);
+        List<SemanticSearchHit> hits = nearest.hits().stream().map(this::toHit).toList();
         return new SemanticSearchResult(
-                normalizedQuery, embeddingProvider.model(), documentId, candidates.size(), hits);
+                normalizedQuery, embeddingProvider.model(), documentId, nearest.candidateCount(), hits);
     }
 
     private String validateQuery(String query) {
@@ -66,27 +62,9 @@ public class SemanticSearchService {
         return normalized;
     }
 
-    private SemanticSearchHit toHit(EmbeddedChunk candidate, double score) {
+    private SemanticSearchHit toHit(ScoredEmbeddedChunk candidate) {
         return new SemanticSearchHit(
                 candidate.chunkId(), candidate.parentId(), candidate.documentId(), candidate.filename(),
-                candidate.headingPath(), candidate.childText(), candidate.parentText(), score);
-    }
-
-    private double cosine(double[] left, double[] right) {
-        if (left.length != right.length) {
-            return -1;
-        }
-        double dot = 0;
-        double leftNorm = 0;
-        double rightNorm = 0;
-        for (int index = 0; index < left.length; index++) {
-            dot += left[index] * right[index];
-            leftNorm += left[index] * left[index];
-            rightNorm += right[index] * right[index];
-        }
-        if (leftNorm == 0 || rightNorm == 0) {
-            return 0;
-        }
-        return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
+                candidate.headingPath(), candidate.childText(), candidate.parentText(), candidate.score());
     }
 }

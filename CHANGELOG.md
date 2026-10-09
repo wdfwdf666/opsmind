@@ -2,6 +2,36 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-010] 使用 pgvector 执行数据库侧 Top-K 向量检索
+
+- **日期**：2026-10-09
+- **类型**：功能 / RAG / PostgreSQL / 性能架构
+- **状态**：已完成
+- **关联需求或问题**：继续完成项目；解决 FEAT-008 中“把当前模型的全部向量加载到 JVM，再逐条计算余弦相似度”的扩展性问题。
+- **问题**：旧检索路径的网络传输量、JVM 内存和计算时间都会随候选 Chunk 数线性增长，数据库只负责过滤，不负责 Top-K；文本序列化向量也无法使用专用向量索引。
+- **根因**：FEAT-008 为了先建立无外部依赖的可复现基线，使用 `TEXT` 保存向量，并把余弦计算留在应用层；原 `postgres:17-alpine` 镜像不包含 pgvector 扩展。
+- **官方依据**：[pgvector 官方项目](https://github.com/pgvector/pgvector)支持 `vector` 类型、`<=>` 余弦距离、精确/近似最近邻检索和 HNSW 索引；官方 Docker 镜像提供 PostgreSQL 17 标签。`vector` 的 HNSW 索引最多支持 2000 维，因此当前 Qwen 1024 维可直接索引。
+- **修改内容**：
+  - Compose 数据库镜像固定为 `pgvector/pgvector:0.8.7-pg17-bookworm`，继续复用项目内 `data/postgres` 绑定目录，不重建数据库数据。
+  - 新增 PostgreSQL 专属 Flyway V5：启用 `vector` 扩展，为 `chunk_embedding` 增加原生 `vector_value`，从 `vector_data` 无损回填既有向量并设为非空。
+  - 为 `qwen3.7-text-embedding / 1024维` 和 `local-feature-hashing-v1 / 256维` 分别建立部分 HNSW 余弦索引；同一表继续支持不同模型、不同维度共存。
+  - `ChunkEmbeddingRepository` 新增数据库侧 `findNearest` 契约；PostgreSQL 使用 `<=>` 排序和 `LIMIT`，只向 JVM 返回 Top-K 结果与 Parent 上下文，不再返回全部向量。
+  - 候选总数通过独立轻量 `COUNT` 查询获得；Top-K SQL 不包含窗口聚合，避免为了 `candidateCount` 强制扫描并排序全部候选。
+  - Top-K 子查询只绑定一份查询向量并计算一次距离，外层将 `distance` 转为相似度 `score`，避免重复传输和重复表达式计算。
+  - 写入时同时维护原生向量列与文本兼容列；H2 测试环境保留仓储内确定性余弦兼容路径，并通过独立 Flyway location 隔离 PostgreSQL 方言迁移。
+  - 相似度计算从应用服务下沉到仓储/数据库，`SemanticSearchService` 只负责编排查询向量、参数校验与响应映射。
+- **实现中发现的问题**：
+  - Flyway 会递归扫描 `db/migration`，最初把 PostgreSQL 专属 V5 放在其子目录仍被 H2 发现，导致 `CREATE EXTENSION` 语法失败；改为独立的 `db/postgresql-migration`，测试配置只扫描通用目录。
+  - 首版 SQL 使用 `COUNT(*) OVER()` 同时返回候选数，虽然功能正确，但会削弱 HNSW 的提前截断价值；改为 `COUNT + Top-K` 两条查询，使距离查询保持纯 `ORDER BY distance LIMIT K` 结构。
+  - 使用子查询向量进行 `EXPLAIN` 时规划器无法匹配 HNSW；改用与 JDBC 参数等价的固定向量验证后，执行计划命中 `idx_chunk_embedding_qwen_hnsw`。
+- **影响文件**：Compose 镜像、Flyway 配置与 V5、向量编码器、Embedding 仓储契约与 JDBC 实现、检索服务、领域结果模型、H2 测试配置、仓储测试、`README.md`、`CHANGELOG.md`
+- **验证方式**：执行 `.\mvnw.cmd clean test -q` 和最终 `.\mvnw.cmd test -q`；重建真实 PostgreSQL 容器并保留原绑定数据；启动生产 Qwen 配置执行 V5、真实向量重建和搜索；使用 SQL 核对扩展、迁移、回填、维度、索引，并用 `EXPLAIN` 验证 HNSW 路径。
+- **验证结果**：37 个自动化测试通过，0 失败，0 错误；PostgreSQL 17.11 成功安装 pgvector 0.8.7 并迁移到 V5；6 条历史向量全部回填，`vector_value` 空值为 0，维度覆盖 256 和 1024；两个 HNSW 索引均存在。真实 Qwen 重建写入 3 条 1024 维向量；查询“数据库连接池告警如何处置”返回 3 个候选和 3 个结果，Top-1 仍为“OpsMind 运维手册 > 告警处置”，得分约 0.867，并返回 Parent 上下文。
+- **修改前指标**：每次搜索加载当前模型的全部候选向量到 JVM，JVM 执行全部余弦计算；向量仅以 `TEXT` 保存；无专用向量索引。
+- **修改后指标**：JVM 每次只接收最多 `topK` 条命中（默认 5、最大 50）；PostgreSQL 原生保存向量并执行余弦 Top-K；2 个按模型与维度隔离的 HNSW 索引；历史向量 100% 回填成功。
+- **修改效果**：检索边界从“应用层全量扫描”升级为“数据库侧候选过滤、距离排序和 Top-K”，降低大数据量下的网络与 JVM 压力；保留 API、模型版本隔离和 Parent-Child 返回语义。
+- **风险与回滚**：HNSW 是近似索引，召回率、构建时间和内存需要用更大数据集评测；当前只有 3 条 Qwen 候选，约 522 ms 的端到端时间主要包含远程查询 Embedding，不能作为数据库性能结论。自定义模型/维度可以使用原生 pgvector 精确排序，但若要 HNSW 需新增对应的部分索引。V5 已执行后不能修改或删除，应通过新的前向迁移演进；代码回滚前需保留兼容列。
+
 ## [VERIFY-001] 验证 Qwen Embedding 真实调用与检索闭环
 
 - **日期**：2026-10-09

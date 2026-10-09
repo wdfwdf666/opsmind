@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 9 步：接入 Qwen 文本 Embedding（FEAT-009）**。
+当前完成 **第 10 步：使用 pgvector 执行数据库侧 Top-K 向量检索（FEAT-010）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -19,10 +19,11 @@
 - 已实现标题感知的 Parent-Child 分块：父块保留完整上下文，子块用于后续精确召回，并持久化标题路径、内容哈希和预估 Token 数。
 - 分块采用确定性 ID 和事务化全量替换，同一正文重复重建不会产生重复记录或改变 Chunk ID。
 - 已提供可替换的 `EmbeddingProvider`；生产默认使用 Qwen，同时保留离线可运行的 256 维中文字符 n-gram 特征哈希作为测试与对照基线，模型名和维度随向量一同持久化。
-- 已实现 Child 精确余弦检索和 Parent 上下文展开，可按单文档过滤并返回候选数、相似度、标题路径与父块正文。
+- 已使用 pgvector 将 Child 余弦 Top-K 下沉到 PostgreSQL，并支持 Parent 上下文展开、单文档过滤、候选数、相似度和标题路径返回。
 - 生产默认使用阿里云百炼 `qwen3.7-text-embedding` 1024 维模型，通过 OpenAI 兼容接口调用；本地特征模型仅在测试或显式降级配置下启用。
 - Qwen 适配器支持最多 20 条自动分批、响应顺序恢复、维度校验、上游错误脱敏，并在缺少 Key/Base URL 时明确返回 503。
 - 已完成真实 Qwen 闭环验证：3 个 Child Chunk 成功生成 1024 维向量，中文查询 Top-1 命中正确章节并返回 Parent 上下文；详细数据见 `CHANGELOG.md` 的 VERIFY-001。
+- PostgreSQL 使用原生 `vector` 列保存向量，为 Qwen 1024 维和本地基线 256 维分别建立部分 HNSW 余弦索引；JVM 每次只接收 Top-K 命中，不再加载全部候选向量。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
 - 当前自动化测试：37 个，全部通过。
@@ -35,7 +36,7 @@ docker compose -p opsmind up -d postgres
 .\mvnw.cmd spring-boot:run
 ```
 
-项目自带的 PostgreSQL 默认映射到宿主机 `5433`，避免与本机常见的 `5432` 实例冲突。应用默认连接 `jdbc:postgresql://localhost:5433/opsmind`；也可使用 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖连接配置。
+项目使用带 pgvector 0.8.7 的 PostgreSQL 17 镜像，默认映射到宿主机 `5433`，避免与本机常见的 `5432` 实例冲突。应用默认连接 `jdbc:postgresql://localhost:5433/opsmind`；也可使用 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖连接配置。
 
 生产默认使用 Qwen Embedding。项目启动时会可选加载根目录 `.env`。先复制模板，再填写从阿里云百炼获取的当前地域 API Key 和 OpenAI 兼容 Base URL：
 
@@ -79,7 +80,7 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：Qwen 调用需要用户自己的阿里云百炼凭证并产生外部 API 费用；目前已完成单文档真实调用与检索功能验证，但尚未通过固定问答集评估整体检索质量，也没有进行并发压测。检索仍会把当前模型的全部候选向量读入 JVM 做精确余弦计算，数据量增大后不具备扩展性。下一步 `FEAT-010` 将引入 pgvector，在 PostgreSQL 内完成 Top-K 召回，并使用固定问答集比较 Qwen 与本地基线的 Recall@K、MRR、延迟和成本。
+当前限制：Qwen 调用需要用户自己的阿里云百炼凭证并产生外部 API 费用；目前已完成单文档真实调用与 pgvector 检索验证，但尚未通过固定问答集评估整体检索质量，也没有进行并发压测。HNSW 是近似检索，需要在更大语料上调节参数并测量 Recall@K；自定义模型或维度虽然能执行数据库侧精确排序，但需要新增对应的部分索引才能获得 HNSW 加速。下一步将建立固定检索评测集，比较 Qwen 与本地基线的 Recall@K、MRR、P95 延迟和成本。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

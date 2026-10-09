@@ -146,12 +146,14 @@ class JdbcRepositoryTests {
 
         chunkEmbeddingRepository.replaceAll(document.id(), "test-model", java.util.List.of(first));
         chunkEmbeddingRepository.replaceAll(document.id(), "test-model", java.util.List.of(replacement));
-        var candidates = chunkEmbeddingRepository.findCandidates("test-model", document.id());
+        var result = chunkEmbeddingRepository.findNearest(
+                "test-model", new double[]{0, 1, 0}, document.id(), 5);
 
-        assertThat(candidates).hasSize(1);
-        assertThat(candidates.getFirst().chunkId()).isEqualTo(childId);
-        assertThat(candidates.getFirst().parentText()).isEqualTo("complete parent context");
-        assertThat(candidates.getFirst().vector()).containsExactly(0, 1, 0);
+        assertThat(result.candidateCount()).isEqualTo(1);
+        assertThat(result.hits()).hasSize(1);
+        assertThat(result.hits().getFirst().chunkId()).isEqualTo(childId);
+        assertThat(result.hits().getFirst().parentText()).isEqualTo("complete parent context");
+        assertThat(result.hits().getFirst().score()).isEqualTo(1);
     }
 
     private KnowledgeDocument document(String checksum, String filename) {

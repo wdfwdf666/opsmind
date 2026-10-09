@@ -8,6 +8,7 @@ spring:
     generate-unique-name: true
   flyway:
     enabled: true
+    locations: classpath:db/migration
 
 opsmind:
   document:

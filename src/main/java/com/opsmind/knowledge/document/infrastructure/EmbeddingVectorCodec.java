@@ -14,6 +14,10 @@ public class EmbeddingVectorCodec {
                 .collect(Collectors.joining(","));
     }
 
+    public String encodePgVector(double[] vector) {
+        return "[" + encode(vector) + "]";
+    }
+
     public double[] decode(String encoded) {
         if (encoded == null || encoded.isBlank()) {
             return new double[0];
