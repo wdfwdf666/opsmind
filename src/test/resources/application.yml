@@ -13,4 +13,5 @@ opsmind:
   document:
     max-size: 20MB
     storage-location: target/test-documents
+    max-extracted-characters: 2000000
 

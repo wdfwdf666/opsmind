@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -47,6 +48,21 @@ public class LocalDocumentStorage implements DocumentStorage {
             return storageKey;
         } catch (IOException exception) {
             throw new DocumentException("DOCUMENT_STORAGE_FAILED", "Failed to store the uploaded file",
+                    HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @Override
+    public InputStream open(String storageKey) {
+        Path source = storageRoot.resolve(storageKey).normalize();
+        if (!source.startsWith(storageRoot)) {
+            throw new DocumentException("DOCUMENT_STORAGE_PATH_INVALID", "Invalid document storage path",
+                    HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+        try {
+            return Files.newInputStream(source);
+        } catch (IOException exception) {
+            throw new DocumentException("DOCUMENT_FILE_NOT_FOUND", "Stored document file is unavailable",
                     HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }

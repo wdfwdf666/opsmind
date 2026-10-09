@@ -33,5 +33,18 @@ public class InMemoryDocumentRepository implements DocumentRepository {
         documentsById.put(document.id(), document);
         return new SaveResult(document, true);
     }
+
+    @Override
+    public synchronized void updateStatus(UUID documentId, com.opsmind.knowledge.document.domain.DocumentStatus status) {
+        KnowledgeDocument current = documentsById.get(documentId);
+        if (current == null) {
+            return;
+        }
+        KnowledgeDocument updated = new KnowledgeDocument(
+                current.id(), current.originalFilename(), current.mediaType(), current.size(), current.sha256(),
+                current.storageKey(), status, current.createdAt());
+        documentsById.put(documentId, updated);
+        documentsByChecksum.put(updated.sha256(), updated);
+    }
 }
 

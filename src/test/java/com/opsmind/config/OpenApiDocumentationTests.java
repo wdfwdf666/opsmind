@@ -29,6 +29,8 @@ class OpenApiDocumentationTests {
                 .andExpect(jsonPath("$.paths['/api/v1/documents'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/documents'].post.requestBody.content['multipart/form-data']").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}/process'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}/content'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/system/info'].get").exists());
     }
 

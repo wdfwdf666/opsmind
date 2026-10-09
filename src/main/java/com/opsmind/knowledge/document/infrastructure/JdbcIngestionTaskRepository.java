@@ -58,6 +58,34 @@ public class JdbcIngestionTaskRepository implements IngestionTaskRepository {
         return tasks.stream().findFirst();
     }
 
+    @Override
+    public boolean tryMarkRunning(UUID documentId, Instant now, Instant staleBefore) {
+        return jdbcTemplate.update("""
+                UPDATE ingestion_task
+                SET status = 'RUNNING', updated_at = ?, error_message = NULL
+                WHERE document_id = ?
+                  AND (status IN ('PENDING', 'FAILED') OR (status = 'RUNNING' AND updated_at < ?))
+                """, Timestamp.from(now), documentId, Timestamp.from(staleBefore)) == 1;
+    }
+
+    @Override
+    public void markSucceeded(UUID documentId, Instant now) {
+        updateStatus(documentId, IngestionTaskStatus.SUCCEEDED, now, null);
+    }
+
+    @Override
+    public void markFailed(UUID documentId, Instant now, String errorMessage) {
+        updateStatus(documentId, IngestionTaskStatus.FAILED, now, errorMessage);
+    }
+
+    private void updateStatus(UUID documentId, IngestionTaskStatus status, Instant now, String errorMessage) {
+        jdbcTemplate.update("""
+                UPDATE ingestion_task
+                SET status = ?, updated_at = ?, error_message = ?
+                WHERE document_id = ?
+                """, status.name(), Timestamp.from(now), errorMessage, documentId);
+    }
+
     private IngestionTask mapTask(ResultSet resultSet, int rowNumber) throws SQLException {
         return new IngestionTask(
                 resultSet.getObject("id", UUID.class),

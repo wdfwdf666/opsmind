@@ -58,9 +58,9 @@ class JdbcRepositoryTests {
         assertThat(second.id()).isEqualTo(first.id());
         assertThat(taskRepository.findByDocumentId(document.id())).contains(first);
         Integer migrationCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '1' AND \"success\" = TRUE",
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" IN ('1', '2') AND \"success\" = TRUE",
                 Integer.class);
-        assertThat(migrationCount).isEqualTo(1);
+        assertThat(migrationCount).isEqualTo(2);
     }
 
     private KnowledgeDocument document(String checksum, String filename) {

@@ -56,6 +56,11 @@ public class JdbcDocumentRepository implements DocumentRepository {
         }
     }
 
+    @Override
+    public void updateStatus(UUID documentId, DocumentStatus status) {
+        jdbcTemplate.update("UPDATE knowledge_document SET status = ? WHERE id = ?", status.name(), documentId);
+    }
+
     private Optional<KnowledgeDocument> queryOne(String sql, Object argument) {
         List<KnowledgeDocument> documents = jdbcTemplate.query(sql, this::mapDocument, argument);
         return documents.stream().findFirst();

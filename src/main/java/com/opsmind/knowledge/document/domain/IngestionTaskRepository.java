@@ -9,5 +9,11 @@ public interface IngestionTaskRepository {
     IngestionTask getOrCreate(UUID documentId, Instant now);
 
     Optional<IngestionTask> findByDocumentId(UUID documentId);
+
+    boolean tryMarkRunning(UUID documentId, Instant now, Instant staleBefore);
+
+    void markSucceeded(UUID documentId, Instant now);
+
+    void markFailed(UUID documentId, Instant now, String errorMessage);
 }
 

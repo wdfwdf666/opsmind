@@ -8,7 +8,11 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -49,5 +53,28 @@ class DocumentControllerTests {
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(jsonPath("$.code").value("DOCUMENT_TYPE_NOT_SUPPORTED"))
                 .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void shouldProcessAndReturnCleanedContent() throws Exception {
+        String uniqueText = "restart-service-" + UUID.randomUUID();
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "operations.txt", MediaType.TEXT_PLAIN_VALUE,
+                ("Operations\r\n\r\n\r\n" + uniqueText).getBytes());
+
+        String uploadResponse = mockMvc.perform(multipart("/api/v1/documents").file(file))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String documentId = com.jayway.jsonpath.JsonPath.read(uploadResponse, "$.data.documentId");
+
+        mockMvc.perform(post("/api/v1/documents/{documentId}/process", documentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.documentStatus").value("READY"))
+                .andExpect(jsonPath("$.data.taskStatus").value("SUCCEEDED"));
+
+        mockMvc.perform(get("/api/v1/documents/{documentId}/content", documentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.text").value("Operations\n\n" + uniqueText))
+                .andExpect(jsonPath("$.data.characterCount").value(("Operations\n\n" + uniqueText).length()));
     }
 }

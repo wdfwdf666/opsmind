@@ -24,6 +24,7 @@ opsmind:
   document:
     max-size: 20MB
     storage-location: data/documents
+    max-extracted-characters: 2000000
 
 server:
   shutdown: graceful

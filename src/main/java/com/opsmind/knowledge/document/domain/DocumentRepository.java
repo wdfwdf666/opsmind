@@ -11,6 +11,8 @@ public interface DocumentRepository {
 
     SaveResult saveIfAbsent(KnowledgeDocument document);
 
+    void updateStatus(UUID documentId, DocumentStatus status);
+
     record SaveResult(KnowledgeDocument document, boolean created) {
     }
 }
