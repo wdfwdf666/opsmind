@@ -2,6 +2,35 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-008] 建立可复现 Embedding 与 Parent-Child 向量检索基线
+
+- **日期**：2026-10-09
+- **类型**：功能 / RAG / 检索 / 数据库
+- **状态**：已完成
+- **关联需求或问题**：项目实施第 8 步；把已持久化的 Child Chunk 转换为可排序向量，并验证“小块召回、大块返回”的 Parent-Child 检索路径
+- **问题**：`FEAT-007` 只有分块数据，尚不能根据自然语言问题召回相关内容；若直接绑定某一家外部模型，开发、测试和演示会依赖 API Key 与网络，也难以稳定复现回归结果。
+- **根因**：缺少 Embedding 模型抽象、向量版本存储、索引编排、相似度计算和搜索 API。
+- **修改内容**：
+  - 新增 `EmbeddingProvider` 接口，将模型名、维度和批量向量生成与索引/检索业务解耦；真实模型适配器后续可以直接替换默认实现。
+  - 提供 `local-feature-hashing-v1` 本地基线：对 NFKC 归一化后的字符 1~3 gram 做 256 维带符号特征哈希并 L2 归一化，保证无网络环境下结果确定、快速且可重复测试。
+  - Embedding 输入由 `headingPath + Child 正文` 组成，使章节语义参与召回；仅对 Child 建向量，命中后通过 `parentId` JOIN 返回完整 Parent 正文。
+  - 新增 Flyway V4 `chunk_embedding` 表，按 `chunkId + embeddingModel` 保存模型版本、维度、序列化向量、内容哈希和生成时间；支持同一 Chunk 并存不同模型版本。
+  - 向量重建在事务内按“文档 + 模型”替换，避免查询到半套索引；Chunk 或文档删除时由外键级联清理向量。
+  - 新增 `POST /api/v1/documents/{documentId}/embeddings/rebuild`，要求 Child Chunk 已存在，并返回模型、维度和生成数量。
+  - 新增 `POST /api/v1/search`，支持 `query`、`topK` 和可选 `documentId`；校验空查询、1000 字符上限及 Top-K 边界，按精确余弦相似度稳定排序。
+  - 搜索结果同时返回 Child 命中片段、Parent 上下文、标题路径、文档信息与相似度，为后续 RAG 上下文构建和引用提供数据。
+- **实现中发现的问题**：
+  - 首次 Spring 上下文测试因 `DocumentEmbeddingService` 同时存在生产构造器和固定时钟测试构造器，Spring 无法选择注入入口；显式标记生产构造器为 `@Autowired` 后恢复。
+  - 首次候选 JOIN 使用了不存在的 `knowledge_document.filename`；真实字段为 `original_filename`。JDBC 集成测试捕获后修正别名，避免问题进入真实 PostgreSQL。
+  - 本地特征哈希并不理解同义词或深层语义，因此将其明确定位为可复现的词面向量基线，而不是虚构真实语义模型效果。
+- **影响文件**：Embedding 配置与提供者接口、本地特征哈希实现、Embedding/搜索领域模型与服务、JDBC 向量仓储、文档与搜索 API、Flyway V4、配置、OpenAPI/API/JDBC/算法测试、`README.md`、`CHANGELOG.md`
+- **验证方式**：执行 `.\mvnw.cmd test -q` 和 `.\mvnw.cmd package -q`；使用 H2 PostgreSQL 模式验证 V4、事务替换、向量编解码、Parent JOIN、相关性排序和接口边界；在 PostgreSQL 17.11 上对 FEAT-007 文档重建向量并发起真实中文检索，使用 SQL 核对迁移和记录数。
+- **验证结果**：34 个自动化测试通过，0 失败，0 错误；真实 PostgreSQL 成功迁移到 V4。文档 `79fc1fcf-93f1-44a0-bc86-95cac599f082` 的 3 个 Child 生成 3 条 `local-feature-hashing-v1` 256 维向量；查询“数据库连接池告警如何处置”在 3 个候选中 Top-1 命中“OpsMind 运维手册 > 告警处置”，余弦得分约 0.471，并成功返回 Parent 正文。
+- **修改前指标**：8 个业务 API 操作；0 条 Embedding；无法按问题检索；31 个自动化测试。
+- **修改后指标**：10 个业务 API 操作；真实验证持久化 3 条 256 维向量；支持全库/单文档 Top-K 和 Parent 上下文展开；34 个自动化测试。
+- **修改效果**：形成首个无需外部服务即可演示和回归的 RAG 检索闭环，为后续接入真实模型、pgvector、混合检索和质量评测提供稳定接口与可对照基线。
+- **风险与回滚**：特征哈希主要衡量词面相似度，不能作为生产语义模型；向量以文本序列化且候选全部加载到 JVM，时间和内存复杂度随 Chunk 数线性增长，仅适合当前小数据基线。下一步迁移到 pgvector 数据库侧 Top-K，并用固定评测集比较真实 Embedding 与本地基线。回滚代码时可保留 V4 表；数据库降级必须通过新的前向迁移，不能编辑已执行的 V4。
+
 ## [FEAT-007] 实现标题感知的 Parent-Child 文档分块
 
 - **日期**：2026-10-09

@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 7 步：标题感知的 Parent-Child 文档分块（FEAT-007）**。
+当前完成 **第 8 步：可复现 Embedding 与向量检索基线（FEAT-008）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -18,9 +18,11 @@
 - 已提供文档分页列表，单次 JOIN 返回文档与任务状态，默认每页 20 条、最大 100 条，按创建时间倒序。
 - 已实现标题感知的 Parent-Child 分块：父块保留完整上下文，子块用于后续精确召回，并持久化标题路径、内容哈希和预估 Token 数。
 - 分块采用确定性 ID 和事务化全量替换，同一正文重复重建不会产生重复记录或改变 Chunk ID。
+- 已提供可替换的 `EmbeddingProvider`，默认使用离线可运行的 256 维中文字符 n-gram 特征哈希，模型名和维度随向量一同持久化。
+- 已实现 Child 精确余弦检索和 Parent 上下文展开，可按单文档过滤并返回候选数、相似度、标题路径与父块正文。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：31 个，全部通过。
+- 当前自动化测试：34 个，全部通过。
 
 本地验证：
 
@@ -49,6 +51,8 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 - 查看正文：`GET http://localhost:8080/api/v1/documents/{documentId}/content`
 - 重建分块：`POST http://localhost:8080/api/v1/documents/{documentId}/chunks/rebuild`
 - 查询分块：`GET http://localhost:8080/api/v1/documents/{documentId}/chunks?type=CHILD&page=0&size=50`
+- 重建向量：`POST http://localhost:8080/api/v1/documents/{documentId}/embeddings/rebuild`
+- 向量检索：`POST http://localhost:8080/api/v1/search`
 - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
 - OpenAPI JSON：`http://localhost:8080/v3/api-docs`
 
@@ -58,11 +62,11 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 ```
 
-上传响应中的 `documentId` 用于触发解析、重建分块和查询结果。在 Swagger UI 中可按“上传 → 触发解析 → 重建分块 → 查询 CHILD 分块”的顺序完成调试。
+上传响应中的 `documentId` 用于触发解析、分块、向量化和限定检索范围。在 Swagger UI 中可按“上传 → 触发解析 → 重建分块 → 重建向量 → 向量检索”的顺序完成调试。
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：解析与分块目前都由同步 HTTP 接口触发，大文档会占用请求线程；Markdown 标题可保留层级，但 Tika 从部分 PDF/DOCX 抽取的纯文本可能缺少结构化标题；Token 数目前按字符数估算。下一步 `FEAT-008` 将引入 Embedding、向量字段与可替换的模型适配器，形成向量检索基线。
+当前限制：默认 `local-feature-hashing-v1` 是为了离线开发和回归测试设计的确定性特征向量，只能建立词面相关性基线，不能替代训练过的语义 Embedding 模型；检索会把当前模型的全部候选向量读入 JVM 做精确余弦计算，数据量增大后不具备扩展性。下一步 `FEAT-009` 将接入真实 OpenAI 兼容 Embedding 适配器与 pgvector，在数据库侧完成 Top-K 向量召回，并保留本地模型用于测试降级。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

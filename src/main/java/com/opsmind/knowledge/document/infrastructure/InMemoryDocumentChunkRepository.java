@@ -22,13 +22,18 @@ public class InMemoryDocumentChunkRepository implements DocumentChunkRepository 
 
     @Override
     public synchronized DocumentChunkPage findPage(UUID documentId, ChunkType type, int page, int size) {
-        List<DocumentChunk> matching = chunks.stream()
-                .filter(chunk -> chunk.documentId().equals(documentId) && chunk.type() == type)
-                .sorted(Comparator.comparingInt(DocumentChunk::ordinal))
-                .toList();
+        List<DocumentChunk> matching = findAll(documentId, type);
         int fromIndex = (int) Math.min((long) page * size, matching.size());
         int toIndex = Math.min(fromIndex + size, matching.size());
         return new DocumentChunkPage(
                 List.copyOf(matching.subList(fromIndex, toIndex)), type, page, size, matching.size());
+    }
+
+    @Override
+    public synchronized List<DocumentChunk> findAll(UUID documentId, ChunkType type) {
+        return chunks.stream()
+                .filter(chunk -> chunk.documentId().equals(documentId) && chunk.type() == type)
+                .sorted(Comparator.comparingInt(DocumentChunk::ordinal))
+                .toList();
     }
 }

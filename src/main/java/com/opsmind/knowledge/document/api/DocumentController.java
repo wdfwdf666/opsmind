@@ -3,6 +3,7 @@ package com.opsmind.knowledge.document.api;
 import com.opsmind.knowledge.document.application.DocumentService;
 import com.opsmind.knowledge.document.application.DocumentCatalogService;
 import com.opsmind.knowledge.document.application.DocumentChunkingService;
+import com.opsmind.knowledge.document.application.DocumentEmbeddingService;
 import com.opsmind.knowledge.document.application.DocumentIngestionService;
 import com.opsmind.knowledge.document.application.DocumentUploadResult;
 import com.opsmind.knowledge.document.domain.ChunkType;
@@ -36,16 +37,19 @@ public class DocumentController {
     private final DocumentIngestionService ingestionService;
     private final DocumentCatalogService catalogService;
     private final DocumentChunkingService chunkingService;
+    private final DocumentEmbeddingService embeddingService;
 
     public DocumentController(
             DocumentService documentService,
             DocumentIngestionService ingestionService,
             DocumentCatalogService catalogService,
-            DocumentChunkingService chunkingService) {
+            DocumentChunkingService chunkingService,
+            DocumentEmbeddingService embeddingService) {
         this.documentService = documentService;
         this.ingestionService = ingestionService;
         this.catalogService = catalogService;
         this.chunkingService = chunkingService;
+        this.embeddingService = embeddingService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -162,5 +166,21 @@ public class DocumentController {
             @RequestParam(defaultValue = "50") int size) {
         return com.opsmind.common.api.ApiResponse.success(
                 DocumentChunkPageResponse.from(chunkingService.list(documentId, type, page, size)));
+    }
+
+    @PostMapping("/{documentId}/embeddings/rebuild")
+    @Operation(
+            summary = "Rebuild child chunk embeddings",
+            description = "Embeds all child chunks with the configured model and atomically replaces that model's vectors.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Embeddings were rebuilt"),
+            @ApiResponse(responseCode = "404", description = "Document was not found", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Child chunks are not ready", content = @Content)
+    })
+    public com.opsmind.common.api.ApiResponse<DocumentEmbeddingResponse> rebuildEmbeddings(
+            @Parameter(description = "Document identifier", required = true, schema = @Schema(format = "uuid"))
+            @PathVariable UUID documentId) {
+        return com.opsmind.common.api.ApiResponse.success(
+                DocumentEmbeddingResponse.from(embeddingService.rebuild(documentId)));
     }
 }

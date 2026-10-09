@@ -29,6 +29,11 @@ opsmind:
     parent-max-characters: 1600
     child-max-characters: 500
     child-overlap-characters: 50
+  embedding:
+    model: local-feature-hashing-v1
+    dimension: 256
+    default-top-k: 5
+    max-top-k: 50
 
 server:
   shutdown: graceful

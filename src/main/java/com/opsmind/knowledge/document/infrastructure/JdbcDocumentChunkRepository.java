@@ -79,6 +79,17 @@ public class JdbcDocumentChunkRepository implements DocumentChunkRepository {
                 chunks, type, page, size, totalElements == null ? 0 : totalElements);
     }
 
+    @Override
+    public List<DocumentChunk> findAll(UUID documentId, ChunkType type) {
+        return jdbcTemplate.query("""
+                SELECT id, document_id, parent_id, chunk_type, ordinal, heading_path, text_content,
+                       content_hash, character_count, estimated_token_count, created_at
+                FROM document_chunk
+                WHERE document_id = ? AND chunk_type = ?
+                ORDER BY ordinal
+                """, this::mapChunk, documentId, type.name());
+    }
+
     private DocumentChunk mapChunk(ResultSet resultSet, int rowNumber) throws SQLException {
         return new DocumentChunk(
                 resultSet.getObject("id", UUID.class),

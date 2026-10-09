@@ -5,6 +5,8 @@ import com.opsmind.knowledge.document.domain.DocumentQueryRepository;
 import com.opsmind.knowledge.document.domain.DocumentChunk;
 import com.opsmind.knowledge.document.domain.DocumentChunkRepository;
 import com.opsmind.knowledge.document.domain.ChunkType;
+import com.opsmind.knowledge.document.domain.ChunkEmbedding;
+import com.opsmind.knowledge.document.domain.ChunkEmbeddingRepository;
 import com.opsmind.knowledge.document.domain.DocumentStatus;
 import com.opsmind.knowledge.document.domain.IngestionTaskRepository;
 import com.opsmind.knowledge.document.domain.IngestionTaskStatus;
@@ -37,6 +39,9 @@ class JdbcRepositoryTests {
     @Autowired
     private DocumentChunkRepository documentChunkRepository;
 
+    @Autowired
+    private ChunkEmbeddingRepository chunkEmbeddingRepository;
+
     @Test
     void shouldPersistDocumentAndEnforceChecksumUniqueness() {
         String checksum = UUID.randomUUID().toString().replace("-", "")
@@ -68,9 +73,9 @@ class JdbcRepositoryTests {
         assertThat(second.id()).isEqualTo(first.id());
         assertThat(taskRepository.findByDocumentId(document.id())).contains(first);
         Integer migrationCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" IN ('1', '2', '3') AND \"success\" = TRUE",
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" IN ('1', '2', '3', '4') AND \"success\" = TRUE",
                 Integer.class);
-        assertThat(migrationCount).isEqualTo(3);
+        assertThat(migrationCount).isEqualTo(4);
     }
 
     @Test
@@ -118,6 +123,35 @@ class JdbcRepositoryTests {
         assertThat(firstPage.totalElements()).isEqualTo(1);
         assertThat(afterReplacement.items()).isEmpty();
         assertThat(afterReplacement.totalElements()).isZero();
+    }
+
+    @Test
+    void shouldReplaceEmbeddingsAndLoadSearchCandidatesWithParentContext() {
+        KnowledgeDocument document = document(randomChecksum(), "embedded.md");
+        documentRepository.saveIfAbsent(document);
+        UUID parentId = UUID.randomUUID();
+        UUID childId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-10-09T06:00:00Z");
+        DocumentChunk parent = new DocumentChunk(
+                parentId, document.id(), null, ChunkType.PARENT, 0, "Guide > Database", "complete parent context",
+                "d".repeat(64), 23, 6, createdAt);
+        DocumentChunk child = new DocumentChunk(
+                childId, document.id(), parentId, ChunkType.CHILD, 0, "Guide > Database", "database child",
+                "e".repeat(64), 14, 4, createdAt);
+        documentChunkRepository.replaceAll(document.id(), java.util.List.of(parent, child));
+        ChunkEmbedding first = new ChunkEmbedding(
+                childId, document.id(), "test-model", 3, new double[]{1, 0, 0}, child.contentHash(), createdAt);
+        ChunkEmbedding replacement = new ChunkEmbedding(
+                childId, document.id(), "test-model", 3, new double[]{0, 1, 0}, child.contentHash(), createdAt.plusSeconds(1));
+
+        chunkEmbeddingRepository.replaceAll(document.id(), "test-model", java.util.List.of(first));
+        chunkEmbeddingRepository.replaceAll(document.id(), "test-model", java.util.List.of(replacement));
+        var candidates = chunkEmbeddingRepository.findCandidates("test-model", document.id());
+
+        assertThat(candidates).hasSize(1);
+        assertThat(candidates.getFirst().chunkId()).isEqualTo(childId);
+        assertThat(candidates.getFirst().parentText()).isEqualTo("complete parent context");
+        assertThat(candidates.getFirst().vector()).containsExactly(0, 1, 0);
     }
 
     private KnowledgeDocument document(String checksum, String filename) {

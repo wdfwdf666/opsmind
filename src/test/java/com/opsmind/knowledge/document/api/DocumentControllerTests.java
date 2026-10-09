@@ -131,4 +131,42 @@ class DocumentControllerTests {
                 .andExpect(jsonPath("$.data.items[0].contentHash").isNotEmpty())
                 .andExpect(jsonPath("$.data.items[0].headingPath").value(org.hamcrest.Matchers.containsString("部署指南")));
     }
+
+    @Test
+    void shouldEmbedChildChunksAndReturnParentContextFromSemanticSearch() throws Exception {
+        String markdown = "# 运维知识库\n\n## 数据库告警\n连接池耗尽时检查慢查询和连接泄漏。\n\n"
+                + "## 发布规范\n发布前保存版本号，完成后执行冒烟测试。";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "search-guide.md", "text/markdown", markdown.getBytes());
+        String uploadResponse = mockMvc.perform(multipart("/api/v1/documents").file(file))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String documentId = com.jayway.jsonpath.JsonPath.read(uploadResponse, "$.data.documentId");
+        mockMvc.perform(post("/api/v1/documents/{documentId}/process", documentId)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/documents/{documentId}/chunks/rebuild", documentId)).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/documents/{documentId}/embeddings/rebuild", documentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.model").value("local-feature-hashing-v1"))
+                .andExpect(jsonPath("$.data.dimension").value(256))
+                .andExpect(jsonPath("$.data.embeddedChunkCount").value(2));
+
+        mockMvc.perform(post("/api/v1/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"数据库连接池泄漏", "topK":1, "documentId":"%s"}
+                                """.formatted(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.candidateCount").value(2))
+                .andExpect(jsonPath("$.data.hits[0].headingPath").value(org.hamcrest.Matchers.containsString("数据库告警")))
+                .andExpect(jsonPath("$.data.hits[0].childText").value(org.hamcrest.Matchers.containsString("连接池耗尽")))
+                .andExpect(jsonPath("$.data.hits[0].parentText").value(org.hamcrest.Matchers.containsString("慢查询")))
+                .andExpect(jsonPath("$.data.hits[0].score").isNumber());
+
+        mockMvc.perform(post("/api/v1/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"query\":\"   \",\"topK\":5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("SEARCH_QUERY_EMPTY"));
+    }
 }
