@@ -27,6 +27,7 @@ class OpenApiDocumentationTests {
                 .andExpect(jsonPath("$.info.title").value("OpsMind API"))
                 .andExpect(jsonPath("$.info.version").value("v1"))
                 .andExpect(jsonPath("$.paths['/api/v1/documents'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/documents'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/documents'].post.requestBody.content['multipart/form-data']").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}/process'].post").exists())

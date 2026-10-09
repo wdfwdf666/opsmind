@@ -1,6 +1,7 @@
 package com.opsmind.knowledge.document.infrastructure;
 
 import com.opsmind.knowledge.document.domain.DocumentRepository;
+import com.opsmind.knowledge.document.domain.DocumentQueryRepository;
 import com.opsmind.knowledge.document.domain.DocumentStatus;
 import com.opsmind.knowledge.document.domain.IngestionTaskRepository;
 import com.opsmind.knowledge.document.domain.IngestionTaskStatus;
@@ -26,6 +27,9 @@ class JdbcRepositoryTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DocumentQueryRepository documentQueryRepository;
 
     @Test
     void shouldPersistDocumentAndEnforceChecksumUniqueness() {
@@ -63,7 +67,34 @@ class JdbcRepositoryTests {
         assertThat(migrationCount).isEqualTo(2);
     }
 
+    @Test
+    void shouldListDocumentsWithTasksInStableNewestFirstOrder() {
+        KnowledgeDocument older = document(
+                randomChecksum(), "older.txt", Instant.parse("2026-10-09T03:00:00Z"));
+        KnowledgeDocument newer = document(
+                randomChecksum(), "newer.txt", Instant.parse("2026-10-09T04:00:00Z"));
+        documentRepository.saveIfAbsent(older);
+        documentRepository.saveIfAbsent(newer);
+        var olderTask = taskRepository.getOrCreate(older.id(), older.createdAt());
+        var newerTask = taskRepository.getOrCreate(newer.id(), newer.createdAt());
+
+        var result = documentQueryRepository.findPage(0, 100);
+        var ids = result.items().stream().map(item -> item.document().id()).toList();
+
+        assertThat(ids).contains(older.id(), newer.id());
+        assertThat(ids.indexOf(newer.id())).isLessThan(ids.indexOf(older.id()));
+        assertThat(result.items().stream().filter(item -> item.document().id().equals(newer.id())).findFirst())
+                .hasValueSatisfying(item -> assertThat(item.taskId()).isEqualTo(newerTask.id()));
+        assertThat(result.items().stream().filter(item -> item.document().id().equals(older.id())).findFirst())
+                .hasValueSatisfying(item -> assertThat(item.taskId()).isEqualTo(olderTask.id()));
+        assertThat(result.totalElements()).isGreaterThanOrEqualTo(2);
+    }
+
     private KnowledgeDocument document(String checksum, String filename) {
+        return document(checksum, filename, Instant.parse("2026-10-09T00:00:00Z"));
+    }
+
+    private KnowledgeDocument document(String checksum, String filename, Instant createdAt) {
         return new KnowledgeDocument(
                 UUID.randomUUID(),
                 filename,
@@ -72,6 +103,11 @@ class JdbcRepositoryTests {
                 checksum,
                 checksum + ".txt",
                 DocumentStatus.UPLOADED,
-                Instant.parse("2026-10-09T00:00:00Z"));
+                createdAt);
+    }
+
+    private String randomChecksum() {
+        return UUID.randomUUID().toString().replace("-", "")
+                + UUID.randomUUID().toString().replace("-", "");
     }
 }

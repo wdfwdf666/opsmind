@@ -1,6 +1,7 @@
 package com.opsmind.knowledge.document.api;
 
 import com.opsmind.knowledge.document.application.DocumentService;
+import com.opsmind.knowledge.document.application.DocumentCatalogService;
 import com.opsmind.knowledge.document.application.DocumentIngestionService;
 import com.opsmind.knowledge.document.application.DocumentUploadResult;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -30,10 +32,15 @@ public class DocumentController {
 
     private final DocumentService documentService;
     private final DocumentIngestionService ingestionService;
+    private final DocumentCatalogService catalogService;
 
-    public DocumentController(DocumentService documentService, DocumentIngestionService ingestionService) {
+    public DocumentController(
+            DocumentService documentService,
+            DocumentIngestionService ingestionService,
+            DocumentCatalogService catalogService) {
         this.documentService = documentService;
         this.ingestionService = ingestionService;
+        this.catalogService = catalogService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -54,6 +61,23 @@ public class DocumentController {
         HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.CREATED;
         return ResponseEntity.status(status)
                 .body(com.opsmind.common.api.ApiResponse.success(DocumentResponse.from(result)));
+    }
+
+    @GetMapping
+    @Operation(
+            summary = "List knowledge documents",
+            description = "Returns documents ordered by creation time descending. Page indexes start at 0.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Paginated document list"),
+            @ApiResponse(responseCode = "400", description = "Invalid page or page size", content = @Content)
+    })
+    public com.opsmind.common.api.ApiResponse<DocumentPageResponse> list(
+            @Parameter(description = "Zero-based page index", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Items per page, between 1 and 100", example = "20")
+            @RequestParam(defaultValue = "20") int size) {
+        return com.opsmind.common.api.ApiResponse.success(
+                DocumentPageResponse.from(catalogService.list(page, size)));
     }
 
     @GetMapping("/{documentId}")
