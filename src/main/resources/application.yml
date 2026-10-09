@@ -30,10 +30,14 @@ opsmind:
     child-max-characters: 500
     child-overlap-characters: 50
   embedding:
-    model: local-feature-hashing-v1
-    dimension: 256
+    provider: ${EMBEDDING_PROVIDER:qwen}
+    model: ${QWEN_EMBEDDING_MODEL:qwen3.7-text-embedding}
+    dimension: ${QWEN_EMBEDDING_DIMENSION:1024}
     default-top-k: 5
     max-top-k: 50
+    base-url: ${QWEN_BASE_URL:}
+    api-key: ${DASHSCOPE_API_KEY:}
+    batch-size: ${QWEN_EMBEDDING_BATCH_SIZE:20}
 
 server:
   shutdown: graceful

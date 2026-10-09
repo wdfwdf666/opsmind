@@ -19,8 +19,12 @@ opsmind:
     child-max-characters: 500
     child-overlap-characters: 50
   embedding:
+    provider: local
     model: local-feature-hashing-v1
     dimension: 256
     default-top-k: 5
     max-top-k: 50
+    base-url:
+    api-key:
+    batch-size: 20
 

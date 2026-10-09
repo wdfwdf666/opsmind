@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 8 步：可复现 Embedding 与向量检索基线（FEAT-008）**。
+当前完成 **第 9 步：接入 Qwen 文本 Embedding（FEAT-009）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -20,9 +20,11 @@
 - 分块采用确定性 ID 和事务化全量替换，同一正文重复重建不会产生重复记录或改变 Chunk ID。
 - 已提供可替换的 `EmbeddingProvider`，默认使用离线可运行的 256 维中文字符 n-gram 特征哈希，模型名和维度随向量一同持久化。
 - 已实现 Child 精确余弦检索和 Parent 上下文展开，可按单文档过滤并返回候选数、相似度、标题路径与父块正文。
+- 生产默认使用阿里云百炼 `qwen3.7-text-embedding` 1024 维模型，通过 OpenAI 兼容接口调用；本地特征模型仅在测试或显式降级配置下启用。
+- Qwen 适配器支持最多 20 条自动分批、响应顺序恢复、维度校验、上游错误脱敏，并在缺少 Key/Base URL 时明确返回 503。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：34 个，全部通过。
+- 当前自动化测试：37 个，全部通过。
 
 本地验证：
 
@@ -33,6 +35,18 @@ docker compose -p opsmind up -d postgres
 ```
 
 项目自带的 PostgreSQL 默认映射到宿主机 `5433`，避免与本机常见的 `5432` 实例冲突。应用默认连接 `jdbc:postgresql://localhost:5433/opsmind`；也可使用 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖连接配置。
+
+生产默认使用 Qwen Embedding。先在阿里云百炼获取当前地域的 API Key、业务空间 ID 和 OpenAI 兼容 Base URL，再设置环境变量：
+
+```powershell
+$env:DASHSCOPE_API_KEY="你的 API Key"
+$env:QWEN_BASE_URL="https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+$env:QWEN_EMBEDDING_MODEL="qwen3.7-text-embedding"
+$env:QWEN_EMBEDDING_DIMENSION="1024"
+.\mvnw.cmd spring-boot:run
+```
+
+密钥只从环境变量读取，不要写入 `application.yml` 或提交到 Git。不同地域的 Base URL 和 API Key 不通用，请以[阿里云百炼向量化官方文档](https://help.aliyun.com/zh/model-studio/embedding)为准。若只需离线开发，可显式设置 `$env:EMBEDDING_PROVIDER="local"`；本地模型只用于测试基线，不能代表 Qwen 的语义效果。
 
 数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
 
@@ -66,7 +80,7 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：默认 `local-feature-hashing-v1` 是为了离线开发和回归测试设计的确定性特征向量，只能建立词面相关性基线，不能替代训练过的语义 Embedding 模型；检索会把当前模型的全部候选向量读入 JVM 做精确余弦计算，数据量增大后不具备扩展性。下一步 `FEAT-009` 将接入真实 OpenAI 兼容 Embedding 适配器与 pgvector，在数据库侧完成 Top-K 向量召回，并保留本地模型用于测试降级。
+当前限制：Qwen 调用需要用户自己的阿里云百炼凭证并产生外部 API 费用；当前环境未配置凭证，因此只完成 Mock HTTP 契约、生产启动和缺少凭证的安全失败验证，真实模型质量仍待配置后评测。检索仍会把当前模型的全部候选向量读入 JVM 做精确余弦计算，数据量增大后不具备扩展性。下一步 `FEAT-010` 将引入 pgvector，在 PostgreSQL 内完成 Top-K 召回，并使用固定问答集比较 Qwen 与本地基线的 Recall@K、MRR、延迟和成本。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

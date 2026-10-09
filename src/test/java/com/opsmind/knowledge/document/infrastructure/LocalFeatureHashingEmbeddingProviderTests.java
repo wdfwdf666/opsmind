@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalFeatureHashingEmbeddingProviderTests {
 
     private final LocalFeatureHashingEmbeddingProvider provider = new LocalFeatureHashingEmbeddingProvider(
-            new EmbeddingProperties("test-feature-hashing", 256, 5, 50));
+            new EmbeddingProperties("local", "test-feature-hashing", 256, 5, 50, "", "", 20));
 
     @Test
     void shouldCreateDeterministicNormalizedVectorsAndRankRelatedTextHigher() {

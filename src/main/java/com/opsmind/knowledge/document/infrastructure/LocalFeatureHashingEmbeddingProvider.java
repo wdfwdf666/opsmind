@@ -3,6 +3,7 @@ package com.opsmind.knowledge.document.infrastructure;
 import com.opsmind.knowledge.document.application.EmbeddingProvider;
 import com.opsmind.knowledge.document.config.EmbeddingProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 
 @Component
+@ConditionalOnProperty(prefix = "opsmind.embedding", name = "provider", havingValue = "local")
 public class LocalFeatureHashingEmbeddingProvider implements EmbeddingProvider {
 
     private final EmbeddingProperties properties;

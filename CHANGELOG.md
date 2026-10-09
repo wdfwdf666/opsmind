@@ -2,6 +2,34 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-009] 接入 Qwen 文本 Embedding 模型
+
+- **日期**：2026-10-09
+- **类型**：功能 / AI 模型 / 安全 / 配置
+- **状态**：代码与契约验证完成；真实模型调用等待用户配置百炼凭证
+- **关联需求或问题**：用户要求项目模型使用 Qwen；将 FEAT-008 的离线词面向量基线升级为可用于中文语义检索的生产模型适配器
+- **问题**：本地特征哈希只能衡量字符片段重合，无法理解同义表达和深层语义；项目虽然已有 `EmbeddingProvider` 抽象，但没有真实模型 HTTP 实现、鉴权、批处理及外部故障处理。
+- **根因**：上一阶段刻意先建立无网络、可复现的检索基线，尚未引入供应商配置和远程调用边界。
+- **官方依据**：阿里云百炼当前提供 OpenAI 兼容 Embedding API；`qwen3.7-text-embedding` 默认 1024 维、支持 256~2560 维，字符串数组单批最多 20 条。不同地域使用工作空间专属 Base URL 和 API Key。
+- **修改内容**：
+  - 新增 `QwenEmbeddingProvider`，调用 `{QWEN_BASE_URL}/embeddings`，使用 `Authorization: Bearer ${DASHSCOPE_API_KEY}`，请求包含模型名、输入数组、维度和 `encoding_format=float`。
+  - 生产配置默认选择 `qwen3.7-text-embedding`、1024 维；模型、维度、Base URL、Key 和批大小全部可由环境变量覆盖，源码与配置文件不保存密钥。
+  - 按配置批大小自动拆分输入，最大限制 20；按响应 `index` 恢复原输入顺序，严格校验返回条数、索引连续性和向量维度。
+  - 使用条件装配隔离 Qwen 与本地 Provider：生产默认 Qwen，测试显式使用 `local-feature-hashing-v1`，避免自动化测试产生费用或依赖外网。
+  - 缺少 Base URL/Key 时返回 `503 EMBEDDING_CONFIGURATION_MISSING`，不静默降级为本地向量；上游 HTTP/连接异常映射为 502，并且不把上游响应体或凭证写入用户响应。
+  - README 增加 PowerShell 配置示例、地域注意事项、密钥安全要求和离线降级方法。
+- **实现中发现的问题**：
+  - 首个契约测试为了简化响应使用 3 维向量，触发项目已有的最小 8 维配置校验；测试改用合法 8 维夹具，生产仍使用 1024 维。
+  - 完整自动化测试使用本地 Provider，因此未覆盖生产 Qwen Bean 的 Spring 装配；真实启动发现当前 WebMVC 依赖组合没有自动提供 `RestClient.Builder` Bean。改为生产构造器自行创建 `RestClient`、测试构造器注入 Mock Builder 后恢复启动。
+  - 本机没有 `DASHSCOPE_API_KEY` 和 `QWEN_BASE_URL`，不能宣称真实 Qwen 质量已验证；本次明确区分“HTTP 契约通过”和“真实模型待凭证验证”。
+- **影响文件**：Embedding 配置、`QwenEmbeddingProvider`、本地 Provider 条件装配、Qwen HTTP 契约测试、测试配置、`README.md`、`CHANGELOG.md`
+- **验证方式**：执行 Qwen Provider 定向测试和 `.\mvnw.cmd test -q`；Mock OpenAI 兼容服务验证请求 JSON、Bearer 头、批处理、乱序响应恢复、远端 5xx 脱敏和缺少凭证拒绝；使用真实 PostgreSQL 配置启动应用并调用重建接口验证安全失败。
+- **验证结果**：37 个自动化测试通过，0 失败，0 错误；生产默认 Qwen 配置成功连接 PostgreSQL 17.11 并启动。未配置凭证时真实 HTTP 接口返回 503，错误码为 `EMBEDDING_CONFIGURATION_MISSING`，数据库中既有本地向量未被删除或覆盖。真实 Qwen 向量质量与调用延迟待用户提供环境变量后验证。
+- **修改前指标**：1 个本地特征哈希 Provider；生产只能生成 256 维词面基线；34 个自动化测试；没有外部模型错误边界。
+- **修改后指标**：2 个可条件切换 Provider；生产默认 Qwen 1024 维；单次最多 20 条自动分批；37 个自动化测试；覆盖配置缺失、上游异常、返回校验和错误脱敏。
+- **修改效果**：项目具备真实 Qwen Embedding 的生产接入路径，同时保留完全离线、无费用、可重复的测试模型；模型供应商边界与索引/搜索业务解耦，后续切换 Qwen 型号或本地 OpenAI 兼容服务无需改动业务层。
+- **风险与回滚**：远程模型存在费用、限流、地域、网络和供应商可用性风险；模型或维度变化必须重建索引，不能混用不同向量空间。当前尚未实现超时/重试/熔断和 Token 成本指标，也未完成真实凭证验证。回滚时设置 `EMBEDDING_PROVIDER=local` 即可恢复离线基线，不涉及数据库迁移。
+
 ## [FEAT-008] 建立可复现 Embedding 与 Parent-Child 向量检索基线
 
 - **日期**：2026-10-09
