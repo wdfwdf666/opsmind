@@ -2,8 +2,10 @@ package com.opsmind.knowledge.document.api;
 
 import com.opsmind.knowledge.document.application.DocumentService;
 import com.opsmind.knowledge.document.application.DocumentCatalogService;
+import com.opsmind.knowledge.document.application.DocumentChunkingService;
 import com.opsmind.knowledge.document.application.DocumentIngestionService;
 import com.opsmind.knowledge.document.application.DocumentUploadResult;
+import com.opsmind.knowledge.document.domain.ChunkType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -33,14 +35,17 @@ public class DocumentController {
     private final DocumentService documentService;
     private final DocumentIngestionService ingestionService;
     private final DocumentCatalogService catalogService;
+    private final DocumentChunkingService chunkingService;
 
     public DocumentController(
             DocumentService documentService,
             DocumentIngestionService ingestionService,
-            DocumentCatalogService catalogService) {
+            DocumentCatalogService catalogService,
+            DocumentChunkingService chunkingService) {
         this.documentService = documentService;
         this.ingestionService = ingestionService;
         this.catalogService = catalogService;
+        this.chunkingService = chunkingService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -123,5 +128,39 @@ public class DocumentController {
             @PathVariable UUID documentId) {
         return com.opsmind.common.api.ApiResponse.success(
                 DocumentContentResponse.from(ingestionService.findContent(documentId)));
+    }
+
+    @PostMapping("/{documentId}/chunks/rebuild")
+    @Operation(
+            summary = "Rebuild parent and child chunks",
+            description = "Splits parsed content using Markdown headings and character budgets. "
+                    + "The operation atomically replaces existing chunks and is idempotent for unchanged content.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Chunks were rebuilt"),
+            @ApiResponse(responseCode = "404", description = "Document was not found", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Parsed content is not ready", content = @Content)
+    })
+    public com.opsmind.common.api.ApiResponse<DocumentChunkingResponse> rebuildChunks(
+            @Parameter(description = "Document identifier", required = true, schema = @Schema(format = "uuid"))
+            @PathVariable UUID documentId) {
+        return com.opsmind.common.api.ApiResponse.success(
+                DocumentChunkingResponse.from(chunkingService.rebuild(documentId)));
+    }
+
+    @GetMapping("/{documentId}/chunks")
+    @Operation(summary = "List parent or child chunks")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Paginated chunks"),
+            @ApiResponse(responseCode = "400", description = "Invalid pagination", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Document was not found", content = @Content)
+    })
+    public com.opsmind.common.api.ApiResponse<DocumentChunkPageResponse> chunks(
+            @Parameter(description = "Document identifier", required = true, schema = @Schema(format = "uuid"))
+            @PathVariable UUID documentId,
+            @RequestParam(defaultValue = "CHILD") ChunkType type,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return com.opsmind.common.api.ApiResponse.success(
+                DocumentChunkPageResponse.from(chunkingService.list(documentId, type, page, size)));
     }
 }

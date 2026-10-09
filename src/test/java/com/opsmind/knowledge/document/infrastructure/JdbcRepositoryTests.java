@@ -2,6 +2,9 @@ package com.opsmind.knowledge.document.infrastructure;
 
 import com.opsmind.knowledge.document.domain.DocumentRepository;
 import com.opsmind.knowledge.document.domain.DocumentQueryRepository;
+import com.opsmind.knowledge.document.domain.DocumentChunk;
+import com.opsmind.knowledge.document.domain.DocumentChunkRepository;
+import com.opsmind.knowledge.document.domain.ChunkType;
 import com.opsmind.knowledge.document.domain.DocumentStatus;
 import com.opsmind.knowledge.document.domain.IngestionTaskRepository;
 import com.opsmind.knowledge.document.domain.IngestionTaskStatus;
@@ -30,6 +33,9 @@ class JdbcRepositoryTests {
 
     @Autowired
     private DocumentQueryRepository documentQueryRepository;
+
+    @Autowired
+    private DocumentChunkRepository documentChunkRepository;
 
     @Test
     void shouldPersistDocumentAndEnforceChecksumUniqueness() {
@@ -62,9 +68,9 @@ class JdbcRepositoryTests {
         assertThat(second.id()).isEqualTo(first.id());
         assertThat(taskRepository.findByDocumentId(document.id())).contains(first);
         Integer migrationCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" IN ('1', '2') AND \"success\" = TRUE",
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" IN ('1', '2', '3') AND \"success\" = TRUE",
                 Integer.class);
-        assertThat(migrationCount).isEqualTo(2);
+        assertThat(migrationCount).isEqualTo(3);
     }
 
     @Test
@@ -88,6 +94,30 @@ class JdbcRepositoryTests {
         assertThat(result.items().stream().filter(item -> item.document().id().equals(older.id())).findFirst())
                 .hasValueSatisfying(item -> assertThat(item.taskId()).isEqualTo(olderTask.id()));
         assertThat(result.totalElements()).isGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    void shouldAtomicallyReplaceAndPageDocumentChunks() {
+        KnowledgeDocument document = document(randomChecksum(), "chunks.md");
+        documentRepository.saveIfAbsent(document);
+        UUID parentId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-10-09T05:00:00Z");
+        DocumentChunk parent = new DocumentChunk(
+                parentId, document.id(), null, ChunkType.PARENT, 0, "Guide > Start", "parent text",
+                "b".repeat(64), 11, 3, createdAt);
+        DocumentChunk child = new DocumentChunk(
+                UUID.randomUUID(), document.id(), parentId, ChunkType.CHILD, 0, "Guide > Start", "child text",
+                "c".repeat(64), 10, 3, createdAt);
+
+        documentChunkRepository.replaceAll(document.id(), java.util.List.of(parent, child));
+        var firstPage = documentChunkRepository.findPage(document.id(), ChunkType.CHILD, 0, 10);
+        documentChunkRepository.replaceAll(document.id(), java.util.List.of(parent));
+        var afterReplacement = documentChunkRepository.findPage(document.id(), ChunkType.CHILD, 0, 10);
+
+        assertThat(firstPage.items()).containsExactly(child);
+        assertThat(firstPage.totalElements()).isEqualTo(1);
+        assertThat(afterReplacement.items()).isEmpty();
+        assertThat(afterReplacement.totalElements()).isZero();
     }
 
     private KnowledgeDocument document(String checksum, String filename) {

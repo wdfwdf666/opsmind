@@ -14,4 +14,8 @@ opsmind:
     max-size: 20MB
     storage-location: target/test-documents
     max-extracted-characters: 2000000
+  chunking:
+    parent-max-characters: 1600
+    child-max-characters: 500
+    child-overlap-characters: 50
 

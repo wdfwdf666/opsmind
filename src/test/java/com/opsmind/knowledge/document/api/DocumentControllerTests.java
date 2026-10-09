@@ -104,4 +104,31 @@ class DocumentControllerTests {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("DOCUMENT_PAGE_SIZE_INVALID"));
     }
+
+    @Test
+    void shouldRebuildAndListHeadingAwareChunks() throws Exception {
+        String markdown = "# 部署指南\n\n## 准备\n检查数据库连接和配置中心。\n\n## 发布\n先灰度，再观察监控。";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "deployment.md", "text/markdown", markdown.getBytes());
+        String uploadResponse = mockMvc.perform(multipart("/api/v1/documents").file(file))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String documentId = com.jayway.jsonpath.JsonPath.read(uploadResponse, "$.data.documentId");
+        mockMvc.perform(post("/api/v1/documents/{documentId}/process", documentId))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/documents/{documentId}/chunks/rebuild", documentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.parentCount").isNumber())
+                .andExpect(jsonPath("$.data.childCount").isNumber())
+                .andExpect(jsonPath("$.data.totalCount").isNumber());
+
+        mockMvc.perform(get("/api/v1/documents/{documentId}/chunks", documentId)
+                        .param("type", "CHILD").param("page", "0").param("size", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.type").value("CHILD"))
+                .andExpect(jsonPath("$.data.items[0].parentId").isNotEmpty())
+                .andExpect(jsonPath("$.data.items[0].contentHash").isNotEmpty())
+                .andExpect(jsonPath("$.data.items[0].headingPath").value(org.hamcrest.Matchers.containsString("部署指南")));
+    }
 }
