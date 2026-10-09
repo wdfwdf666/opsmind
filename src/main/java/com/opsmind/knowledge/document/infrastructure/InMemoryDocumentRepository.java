@@ -2,14 +2,12 @@ package com.opsmind.knowledge.document.infrastructure;
 
 import com.opsmind.knowledge.document.domain.DocumentRepository;
 import com.opsmind.knowledge.document.domain.KnowledgeDocument;
-import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-@Repository
 public class InMemoryDocumentRepository implements DocumentRepository {
 
     private final ConcurrentMap<UUID, KnowledgeDocument> documentsById = new ConcurrentHashMap<>();

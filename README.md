@@ -4,24 +4,28 @@
 
 ## 当前实现状态
 
-当前完成 **第 3 步：Swagger UI / OpenAPI 调试界面（FEAT-003）**。
+当前完成 **第 4 步：PostgreSQL + Flyway 元数据持久化（FEAT-004）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
 - 已实现统一 API 响应结构和 `GET /api/v1/system/info` 系统信息接口。
 - 已实现 PDF、DOCX、Markdown、TXT、HTML 上传，包含 20 MB 限制、文件签名检查和安全文件名处理。
 - 使用 SHA-256 内容寻址，同一内容只保存一份，并返回原文档及原处理任务。
-- 已建立文档状态与入库任务状态模型；当前元数据暂存内存，原始文件保存在 `data/documents`。
+- 已使用 PostgreSQL 持久化文档与入库任务元数据，通过数据库唯一约束保证跨重启、跨实例内容去重。
+- 已使用 Flyway 管理数据库版本，首次启动自动执行 `V1__create_document_tables.sql`；原始文件保存在 `data/documents`。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：13 个，全部通过。
+- 当前自动化测试：15 个，全部通过。
 
 本地验证：
 
 ```powershell
+docker compose -p opsmind up -d postgres
 .\mvnw.cmd test
 .\mvnw.cmd spring-boot:run
 ```
+
+项目自带的 PostgreSQL 默认映射到宿主机 `5433`，避免与本机常见的 `5432` 实例冲突。应用默认连接 `jdbc:postgresql://localhost:5433/opsmind`；也可使用 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖连接配置。
 
 启动后访问：
 
@@ -40,7 +44,7 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：应用重启后内存中的文档与任务元数据会丢失，但原始文件仍保留。下一步 `FEAT-004` 将使用 PostgreSQL + Flyway 持久化文档与任务元数据，并用数据库唯一约束保障跨实例去重。
+当前限制：原始文件存储和数据库写入还不在同一事务中，数据库写入失败时可能留下未引用文件。下一步 `FEAT-005` 将实现文档解析与清洗，并补充失败补偿机制，为后续分块和 Embedding 建立可恢复的 ETL 链路。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 
@@ -101,9 +105,9 @@ flowchart LR
 
 | 层次 | 推荐方案 | 作用 |
 |---|---|---|
-| 核心框架 | Java 21、Spring Boot 3.x、Spring AI | Agent、模型调用、Advisor、RAG |
+| 核心框架 | Java 21、Spring Boot 4.1、Spring AI 2.0 | Agent、模型调用、Advisor、RAG |
 | API | Spring WebFlux、SSE、Spring Security | 流式响应、认证鉴权 |
-| 数据 | PostgreSQL、MyBatis-Plus、Flyway | 用户、租户、文档元数据、任务状态 |
+| 数据 | PostgreSQL、Spring JDBC、Flyway | 用户、租户、文档元数据、任务状态 |
 | 检索 | Elasticsearch | BM25、向量检索、RRF 融合、过滤 |
 | 缓存/记忆 | Redis | 会话记忆、语义缓存、分布式锁、限流 |
 | 异步链路 | Kafka 或 RocketMQ（二选一） | 文档解析、Embedding、索引更新、失败重试 |
