@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 2 步：文档上传与去重（FEAT-002）**。
+当前完成 **第 3 步：Swagger UI / OpenAPI 调试界面（FEAT-003）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -12,8 +12,9 @@
 - 已实现 PDF、DOCX、Markdown、TXT、HTML 上传，包含 20 MB 限制、文件签名检查和安全文件名处理。
 - 使用 SHA-256 内容寻址，同一内容只保存一份，并返回原文档及原处理任务。
 - 已建立文档状态与入库任务状态模型；当前元数据暂存内存，原始文件保存在 `data/documents`。
+- 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：11 个，全部通过。
+- 当前自动化测试：13 个，全部通过。
 
 本地验证：
 
@@ -28,6 +29,8 @@
 - 健康检查：`http://localhost:8080/actuator/health`
 - 文档上传：`POST http://localhost:8080/api/v1/documents`
 - 文档状态：`GET http://localhost:8080/api/v1/documents/{documentId}`
+- Swagger UI：`http://localhost:8080/swagger-ui/index.html`
+- OpenAPI JSON：`http://localhost:8080/v3/api-docs`
 
 上传示例：
 
@@ -35,7 +38,9 @@
 curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 ```
 
-当前限制：应用重启后内存中的文档与任务元数据会丢失，但原始文件仍保留。下一步 `FEAT-003` 将使用 PostgreSQL + Flyway 持久化文档与任务元数据，并用数据库唯一约束保障跨实例去重。
+Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
+
+当前限制：应用重启后内存中的文档与任务元数据会丢失，但原始文件仍保留。下一步 `FEAT-004` 将使用 PostgreSQL + Flyway 持久化文档与任务元数据，并用数据库唯一约束保障跨实例去重。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

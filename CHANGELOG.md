@@ -2,6 +2,29 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-003] 集成 Swagger UI 与 OpenAPI 接口文档
+
+- **日期**：2026-10-09
+- **类型**：功能 / 文档
+- **状态**：已完成
+- **关联需求或问题**：缺少浏览器端后端调试界面
+- **问题**：现有接口只能通过 curl 或测试代码调用，无法在浏览器中直观看到请求参数、响应模型、状态码，也不能方便地选择文件测试上传。
+- **根因**：项目未集成 OpenAPI 文档生成器和 Swagger UI，Controller 也没有接口语义注解。
+- **修改内容**：
+  - 引入适配 Spring Boot 4 的 `springdoc-openapi-starter-webmvc-ui` 3.1.0。
+  - 新增 OpsMind OpenAPI 元信息，为系统和知识文档接口补充 Tag、Operation、参数、响应码及字段示例。
+  - 配置 Swagger UI 请求耗时、排序和 Try it out 功能。
+  - 提供 `/swagger-ui/index.html` 调试界面和 `/v3/api-docs` OpenAPI JSON。
+  - 支持通过环境变量 `SWAGGER_ENABLED=false` 在生产环境关闭文档端点。
+- **实现中发现的问题**：首次 OpenAPI 测试发现上传接口被错误描述为 `application/json`，Swagger UI 不会生成文件选择控件。根因是 `@PostMapping` 未显式声明消费类型；增加 `consumes = multipart/form-data` 后文档契约恢复正确。
+- **影响文件**：`pom.xml`、`OpenApiConfiguration.java`、`SystemController.java`、`DocumentController.java`、`DocumentResponse.java`、`application.yml`、OpenAPI 测试、`README.md`
+- **验证方式**：执行 `.\mvnw.cmd test -q`；自动请求 `/v3/api-docs` 和 `/swagger-ui/index.html`，检查文档元信息、3 个业务操作以及上传请求的 `multipart/form-data` 描述。
+- **验证结果**：13 个测试通过，0 失败，0 错误；Swagger UI HTML 返回 200，OpenAPI JSON 返回 200 且包含全部业务接口。
+- **修改前指标**：无浏览器调试界面；无机器可读 API 文档；11 个自动化测试。
+- **修改后指标**：1 个 Swagger UI、1 个 OpenAPI JSON 端点；3 个业务操作生成文档；13 个自动化测试。
+- **修改效果**：开发者可以直接在浏览器中查看并调试接口，文档上传操作能够显示文件选择控件，接口说明与代码同步生成。
+- **风险与回滚**：Swagger 会增加少量启动时间和依赖体积，且接口文档不应在公开生产环境直接暴露；可设置 `SWAGGER_ENABLED=false` 关闭。回滚时移除 Springdoc 依赖、配置类和 Swagger 注解，不影响业务接口。
+
 ## [FEAT-002] 实现文档上传、校验、内容去重与任务状态
 
 - **日期**：2026-10-09
@@ -26,7 +49,7 @@
 - **修改前指标**：1 个业务接口；2 个自动化测试；不支持文档上传、内容去重和任务状态。
 - **修改后指标**：3 个业务接口；11 个自动化测试；同一内容连续上传只生成 1 个原始文件、1 个文档 ID 和 1 个任务 ID。
 - **修改效果**：形成 RAG 离线链路的可靠入口，能够在解析前拒绝常见非法输入，并避免相同内容重复占用存储或重复创建任务。
-- **风险与回滚**：文档和任务元数据当前只保存在单实例内存中，重启后丢失且不支持多实例全局去重；原始文件会保留。下一步使用 PostgreSQL/Flyway 替换内存适配器。回滚时删除知识文档模块并移除相关配置，`FEAT-001` 系统接口不受影响。
+- **风险与回滚**：文档和任务元数据当前只保存在单实例内存中，重启后丢失且不支持多实例全局去重；原始文件会保留。后续使用 PostgreSQL/Flyway 替换内存适配器。回滚时删除知识文档模块并移除相关配置，`FEAT-001` 系统接口不受影响。
 
 ## [FIX-001] 修复 Maven Wrapper 在当前 PowerShell 环境无法启动
 

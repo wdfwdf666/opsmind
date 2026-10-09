@@ -1,9 +1,16 @@
 package com.opsmind.knowledge.document.api;
 
-import com.opsmind.common.api.ApiResponse;
 import com.opsmind.knowledge.document.application.DocumentService;
 import com.opsmind.knowledge.document.application.DocumentUploadResult;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +24,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/documents")
+@Tag(name = "Knowledge Documents", description = "Upload knowledge documents and inspect ingestion status")
 public class DocumentController {
 
     private final DocumentService documentService;
@@ -25,15 +33,36 @@ public class DocumentController {
         this.documentService = documentService;
     }
 
-    @PostMapping
-    public ResponseEntity<ApiResponse<DocumentResponse>> upload(@RequestPart("file") MultipartFile file) {
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(
+            summary = "Upload a knowledge document",
+            description = "Accepts PDF, DOCX, Markdown, TXT or HTML up to 20 MB. Duplicate content returns the existing document.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "A new document was accepted"),
+            @ApiResponse(responseCode = "200", description = "Duplicate content; the existing document was returned"),
+            @ApiResponse(responseCode = "400", description = "Empty, malformed or signature-mismatched file", content = @Content),
+            @ApiResponse(responseCode = "413", description = "File exceeds the configured size limit", content = @Content),
+            @ApiResponse(responseCode = "415", description = "File type is not supported", content = @Content)
+    })
+    public ResponseEntity<com.opsmind.common.api.ApiResponse<DocumentResponse>> upload(
+            @Parameter(description = "Knowledge document to upload", required = true)
+            @RequestPart("file") MultipartFile file) {
         DocumentUploadResult result = documentService.upload(file);
         HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.CREATED;
-        return ResponseEntity.status(status).body(ApiResponse.success(DocumentResponse.from(result)));
+        return ResponseEntity.status(status)
+                .body(com.opsmind.common.api.ApiResponse.success(DocumentResponse.from(result)));
     }
 
     @GetMapping("/{documentId}")
-    public ApiResponse<DocumentResponse> find(@PathVariable UUID documentId) {
-        return ApiResponse.success(DocumentResponse.from(documentService.find(documentId)));
+    @Operation(summary = "Get document ingestion status")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Document and task status"),
+            @ApiResponse(responseCode = "404", description = "Document was not found", content = @Content)
+    })
+    public com.opsmind.common.api.ApiResponse<DocumentResponse> find(
+            @Parameter(description = "Document identifier", required = true,
+                    schema = @Schema(format = "uuid"))
+            @PathVariable UUID documentId) {
+        return com.opsmind.common.api.ApiResponse.success(DocumentResponse.from(documentService.find(documentId)));
     }
 }
