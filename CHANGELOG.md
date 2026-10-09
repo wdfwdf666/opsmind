@@ -2,6 +2,23 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [CONFIG-001] 使用项目根目录 `.env` 管理本地环境配置
+
+- **日期**：2026-10-09
+- **类型**：配置 / 安全 / 开发体验
+- **状态**：已完成
+- **关联需求或问题**：用户希望通过 `.env` 配置 Qwen、PostgreSQL 和 Swagger，而不是每次在 PowerShell 中逐项设置环境变量。
+- **问题**：Spring Boot 默认不会自动加载 `.env`；手工执行 `$env:...` 只对当前终端会话有效，重开终端后需要重复配置，也容易漏掉模型维度或 Base URL。
+- **修改内容**：
+  - 在 `application.yml` 中增加 `spring.config.import=optional:file:.env[.properties]`，以 Java Properties 格式可选加载项目根目录 `.env`；文件不存在时仍可使用系统环境变量和默认值启动。
+  - 新增可提交的 `.env.example`，列出数据库、Qwen Embedding 和 Swagger 所需变量，但不包含真实密钥。
+  - 创建本地 `.env` 并加入 `.gitignore`；只提供空的 Key/Base URL 待用户填写，避免密钥进入 Git 历史。
+  - README 改为“复制模板 → 填写 `.env` → 启动”，并说明不加引号、系统环境变量优先以及生产环境应使用密钥管理服务。
+- **影响文件**：`.gitignore`、`.env.example`、本地 `.env`（不提交）、`application.yml`、`README.md`、`CHANGELOG.md`
+- **验证方式**：执行完整自动化测试和 Maven 打包；使用项目根目录 `.env` 启动应用，确认 PostgreSQL/Flyway 正常连接，且缺少 Qwen 凭证时仍返回既定的安全错误而不是泄露或静默降级。
+- **修改效果**：本地配置可跨终端保存，开发者只需维护一个不入库的文件；配置模板使必需变量清晰可发现，同时保持 CI/CD 环境变量覆盖能力。
+- **风险与回滚**：`.env` 仍是本地明文秘密文件，只适合开发环境，应限制文件访问并避免截图、粘贴或备份泄露；生产环境使用 Vault、云 Secret Manager 或容器编排密钥。回滚时删除 `spring.config.import`、模板和忽略规则即可，现有环境变量配置仍可工作。
+
 ## [FEAT-009] 接入 Qwen 文本 Embedding 模型
 
 - **日期**：2026-10-09

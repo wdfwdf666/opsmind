@@ -36,17 +36,15 @@ docker compose -p opsmind up -d postgres
 
 项目自带的 PostgreSQL 默认映射到宿主机 `5433`，避免与本机常见的 `5432` 实例冲突。应用默认连接 `jdbc:postgresql://localhost:5433/opsmind`；也可使用 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖连接配置。
 
-生产默认使用 Qwen Embedding。先在阿里云百炼获取当前地域的 API Key、业务空间 ID 和 OpenAI 兼容 Base URL，再设置环境变量：
+生产默认使用 Qwen Embedding。项目启动时会可选加载根目录 `.env`。先复制模板，再填写从阿里云百炼获取的当前地域 API Key 和 OpenAI 兼容 Base URL：
 
 ```powershell
-$env:DASHSCOPE_API_KEY="你的 API Key"
-$env:QWEN_BASE_URL="https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-$env:QWEN_EMBEDDING_MODEL="qwen3.7-text-embedding"
-$env:QWEN_EMBEDDING_DIMENSION="1024"
+Copy-Item .env.example .env
+# 使用编辑器填写 .env 中的 DASHSCOPE_API_KEY 和 QWEN_BASE_URL
 .\mvnw.cmd spring-boot:run
 ```
 
-密钥只从环境变量读取，不要写入 `application.yml` 或提交到 Git。不同地域的 Base URL 和 API Key 不通用，请以[阿里云百炼向量化官方文档](https://help.aliyun.com/zh/model-studio/embedding)为准。若只需离线开发，可显式设置 `$env:EMBEDDING_PROVIDER="local"`；本地模型只用于测试基线，不能代表 Qwen 的语义效果。
+`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。不同地域的 Base URL 和 API Key 不通用，请以[阿里云百炼向量化官方文档](https://help.aliyun.com/zh/model-studio/embedding)为准。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER` 改为 `local`；本地模型只用于测试基线，不能代表 Qwen 的语义效果。
 
 数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
 
