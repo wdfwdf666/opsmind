@@ -27,6 +27,12 @@ docker compose -p opsmind up -d postgres
 
 项目自带的 PostgreSQL 默认映射到宿主机 `5433`，避免与本机常见的 `5432` 实例冲突。应用默认连接 `jdbc:postgresql://localhost:5433/opsmind`；也可使用 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖连接配置。
 
+数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
+
+```powershell
+docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
+```
+
 启动后访问：
 
 - 业务探针：`http://localhost:8080/api/v1/system/info`

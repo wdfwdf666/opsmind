@@ -8,13 +8,10 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - opsmind-postgres-data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U opsmind -d opsmind"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 10s
-
-volumes:
-  opsmind-postgres-data:

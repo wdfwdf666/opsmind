@@ -2,6 +2,28 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [ARCH-002] 将 PostgreSQL 数据目录绑定到当前项目
+
+- **日期**：2026-10-09
+- **类型**：架构 / 配置
+- **状态**：已完成
+- **关联需求或问题**：开发者希望在当前项目中定位 PostgreSQL 持久化数据
+- **问题**：Docker 命名卷存放在 Docker Desktop 的 Linux 虚拟机中，Windows 项目目录不可直接看到数据库文件，也不便于理解数据的持久化位置。
+- **根因**：`compose.yml` 使用 `opsmind-postgres-data` 命名卷，实际宿主路径由 Docker 管理。
+- **修改内容**：
+  - 将 PostgreSQL 挂载改为 `./data/postgres:/var/lib/postgresql/data`。
+  - 数据库切换前使用 `pg_dump` 生成 `data/backups/opsmind-before-bind-mount.dump` 逻辑备份。
+  - 重建容器并将备份恢复到新的绑定目录；原命名卷 `opsmind_opsmind-postgres-data` 保留，作为额外回滚副本。
+  - 保持 `data/` 在 `.gitignore` 中，防止数据库二进制文件、上传内容和备份被提交到 Git。
+  - 在 README 中补充数据位置和 `psql` 查看方式。
+- **影响文件**：`compose.yml`、`README.md`、`CHANGELOG.md`；运行时新增 `data/postgres` 和 `data/backups`（均不提交）
+- **验证方式**：使用 `docker inspect opsmind-postgres-1` 检查挂载类型和来源；恢复备份后使用 `psql` 查询文档、任务及 Flyway 迁移记录数量。
+- **验证结果**：挂载类型为 `bind`，来源为项目的 `data/postgres`；容器正常接受连接；恢复后包含 2 条文档、2 条任务和 1 条成功迁移记录。
+- **修改前指标**：数据库位于 Docker 命名卷，项目目录中不可见；已有数据为 2 条文档和 2 条任务。
+- **修改后指标**：数据库位于项目 `data/postgres`；迁移后仍为 2 条文档和 2 条任务，记录数量无损失。
+- **修改效果**：开发者可以在项目目录中明确定位数据库文件，并继续通过 `psql` 或数据库客户端查看逻辑数据。
+- **风险与回滚**：PostgreSQL 物理文件不可直接编辑、复制中的数据库必须先停止，项目目录也会显著增大。回滚时停止容器，将 Compose 挂载改回命名卷后重建；原命名卷未删除，可直接重新挂载。逻辑备份也可通过 `pg_restore` 恢复。
+
 ## [FEAT-004] 使用 PostgreSQL 与 Flyway 持久化文档元数据
 
 - **日期**：2026-10-09
