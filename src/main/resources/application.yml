@@ -40,6 +40,11 @@ opsmind:
     base-url: ${QWEN_BASE_URL:}
     api-key: ${DASHSCOPE_API_KEY:}
     batch-size: ${QWEN_EMBEDDING_BATCH_SIZE:20}
+  search:
+    hybrid:
+      rrf-k: 60
+      candidate-multiplier: 4
+      minimum-candidates: 20
 
 server:
   shutdown: graceful

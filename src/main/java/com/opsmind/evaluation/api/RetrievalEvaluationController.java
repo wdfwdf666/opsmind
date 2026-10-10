@@ -34,6 +34,6 @@ public class RetrievalEvaluationController {
     })
     public ApiResponse<RetrievalEvaluationResponse> run(@RequestBody RetrievalEvaluationRequest request) {
         return ApiResponse.success(RetrievalEvaluationResponse.from(
-                evaluationService.run(request.dataset(), request.documentId())));
+                evaluationService.run(request.dataset(), request.documentId(), request.strategy())));
     }
 }

@@ -28,4 +28,9 @@ opsmind:
     base-url:
     api-key:
     batch-size: 20
+  search:
+    hybrid:
+      rrf-k: 60
+      candidate-multiplier: 4
+      minimum-candidates: 20
 

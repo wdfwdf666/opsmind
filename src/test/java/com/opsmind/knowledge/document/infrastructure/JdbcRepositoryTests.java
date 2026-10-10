@@ -11,6 +11,7 @@ import com.opsmind.knowledge.document.domain.DocumentStatus;
 import com.opsmind.knowledge.document.domain.IngestionTaskRepository;
 import com.opsmind.knowledge.document.domain.IngestionTaskStatus;
 import com.opsmind.knowledge.document.domain.KnowledgeDocument;
+import com.opsmind.knowledge.document.domain.LexicalChunkRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,6 +42,9 @@ class JdbcRepositoryTests {
 
     @Autowired
     private ChunkEmbeddingRepository chunkEmbeddingRepository;
+
+    @Autowired
+    private LexicalChunkRepository lexicalChunkRepository;
 
     @Test
     void shouldPersistDocumentAndEnforceChecksumUniqueness() {
@@ -154,6 +158,13 @@ class JdbcRepositoryTests {
         assertThat(result.hits().getFirst().chunkId()).isEqualTo(childId);
         assertThat(result.hits().getFirst().parentText()).isEqualTo("complete parent context");
         assertThat(result.hits().getFirst().score()).isEqualTo(1);
+        assertThat(lexicalChunkRepository.findCandidates(document.id()))
+                .singleElement()
+                .satisfies(candidate -> {
+                    assertThat(candidate.chunkId()).isEqualTo(childId);
+                    assertThat(candidate.filename()).isEqualTo("embedded.md");
+                    assertThat(candidate.parentText()).isEqualTo("complete parent context");
+                });
     }
 
     private KnowledgeDocument document(String checksum, String filename) {

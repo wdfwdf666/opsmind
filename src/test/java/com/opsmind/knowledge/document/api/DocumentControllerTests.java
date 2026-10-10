@@ -163,6 +163,18 @@ class DocumentControllerTests {
                 .andExpect(jsonPath("$.data.hits[0].parentText").value(org.hamcrest.Matchers.containsString("慢查询")))
                 .andExpect(jsonPath("$.data.hits[0].score").isNumber());
 
+        mockMvc.perform(post("/api/v1/search/hybrid")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"数据库连接池泄漏", "topK":1, "documentId":"%s"}
+                                """.formatted(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.model").value(org.hamcrest.Matchers.startsWith("hybrid-rrf[")))
+                .andExpect(jsonPath("$.data.candidateCount").value(2))
+                .andExpect(jsonPath("$.data.hits[0].headingPath").value(org.hamcrest.Matchers.containsString("数据库告警")))
+                .andExpect(jsonPath("$.data.hits[0].parentText").value(org.hamcrest.Matchers.containsString("慢查询")))
+                .andExpect(jsonPath("$.data.hits[0].score").isNumber());
+
         mockMvc.perform(post("/api/v1/search")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"query\":\"   \",\"topK\":5}"))

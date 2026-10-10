@@ -2,6 +2,8 @@ package com.opsmind.evaluation.application;
 
 import com.opsmind.evaluation.domain.RetrievalEvaluationCase;
 import com.opsmind.evaluation.domain.RetrievalEvaluationDataset;
+import com.opsmind.evaluation.domain.RetrievalStrategy;
+import com.opsmind.knowledge.document.application.HybridSearchService;
 import com.opsmind.knowledge.document.application.SemanticSearchService;
 import com.opsmind.knowledge.document.domain.SemanticSearchHit;
 import com.opsmind.knowledge.document.domain.SemanticSearchResult;
@@ -22,6 +24,7 @@ class RetrievalEvaluationServiceTests {
         UUID documentId = UUID.randomUUID();
         RetrievalEvaluationDatasetLoader loader = mock(RetrievalEvaluationDatasetLoader.class);
         SemanticSearchService searchService = mock(SemanticSearchService.class);
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         var dataset = new RetrievalEvaluationDataset(
                 "test-dataset", "deterministic metrics", List.of(1, 3), List.of(
                 new RetrievalEvaluationCase("case-1", "query one", List.of("Expected A")),
@@ -34,11 +37,12 @@ class RetrievalEvaluationServiceTests {
         long[] timestamps = {0, 10_000_000, 20_000_000, 50_000_000};
         AtomicInteger timestampIndex = new AtomicInteger();
         var service = new RetrievalEvaluationService(
-                loader, searchService, () -> timestamps[timestampIndex.getAndIncrement()]);
+                loader, searchService, hybridSearchService, () -> timestamps[timestampIndex.getAndIncrement()]);
 
-        var report = service.run("test-dataset", documentId);
+        var report = service.run("test-dataset", documentId, RetrievalStrategy.VECTOR);
 
         assertThat(report.caseCount()).isEqualTo(2);
+        assertThat(report.strategy()).isEqualTo(RetrievalStrategy.VECTOR);
         assertThat(report.model()).isEqualTo("test-model");
         assertThat(report.averageCandidateCount()).isEqualTo(3);
         assertThat(report.p50LatencyMs()).isEqualTo(10);

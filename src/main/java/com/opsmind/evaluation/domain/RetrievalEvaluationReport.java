@@ -6,6 +6,7 @@ import java.util.UUID;
 public record RetrievalEvaluationReport(
         String dataset,
         String description,
+        RetrievalStrategy strategy,
         String model,
         UUID documentId,
         int caseCount,

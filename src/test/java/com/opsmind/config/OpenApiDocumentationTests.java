@@ -36,6 +36,7 @@ class OpenApiDocumentationTests {
                 .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}/chunks'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/documents/{documentId}/embeddings/rebuild'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/search'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/search/hybrid'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/evaluations/retrieval/run'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/system/info'].get").exists());
     }

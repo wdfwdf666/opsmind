@@ -5,6 +5,8 @@ import com.opsmind.evaluation.domain.RetrievalEvaluationCaseResult;
 import com.opsmind.evaluation.domain.RetrievalEvaluationDataset;
 import com.opsmind.evaluation.domain.RetrievalEvaluationReport;
 import com.opsmind.evaluation.domain.RetrievalMetricAtK;
+import com.opsmind.evaluation.domain.RetrievalStrategy;
+import com.opsmind.knowledge.document.application.HybridSearchService;
 import com.opsmind.knowledge.document.application.SemanticSearchService;
 import com.opsmind.knowledge.document.domain.SemanticSearchHit;
 import com.opsmind.knowledge.document.domain.SemanticSearchResult;
@@ -25,32 +27,37 @@ public class RetrievalEvaluationService {
 
     private final RetrievalEvaluationDatasetLoader datasetLoader;
     private final SemanticSearchService searchService;
+    private final HybridSearchService hybridSearchService;
     private final LongSupplier nanoTime;
 
     @Autowired
     public RetrievalEvaluationService(
             RetrievalEvaluationDatasetLoader datasetLoader,
-            SemanticSearchService searchService) {
-        this(datasetLoader, searchService, System::nanoTime);
+            SemanticSearchService searchService,
+            HybridSearchService hybridSearchService) {
+        this(datasetLoader, searchService, hybridSearchService, System::nanoTime);
     }
 
     RetrievalEvaluationService(
             RetrievalEvaluationDatasetLoader datasetLoader,
             SemanticSearchService searchService,
+            HybridSearchService hybridSearchService,
             LongSupplier nanoTime) {
         this.datasetLoader = datasetLoader;
         this.searchService = searchService;
+        this.hybridSearchService = hybridSearchService;
         this.nanoTime = nanoTime;
     }
 
-    public RetrievalEvaluationReport run(String datasetName, UUID documentId) {
+    public RetrievalEvaluationReport run(String datasetName, UUID documentId, RetrievalStrategy requestedStrategy) {
+        RetrievalStrategy strategy = requestedStrategy == null ? RetrievalStrategy.VECTOR : requestedStrategy;
         RetrievalEvaluationDataset dataset = datasetLoader.load(datasetName);
         int maxK = dataset.cutoffs().stream().mapToInt(Integer::intValue).max().orElseThrow();
         List<RetrievalEvaluationCaseResult> caseResults = new ArrayList<>(dataset.cases().size());
         String model = null;
         for (RetrievalEvaluationCase evaluationCase : dataset.cases()) {
             long startedAt = nanoTime.getAsLong();
-            SemanticSearchResult searchResult = searchService.search(evaluationCase.query(), maxK, documentId);
+            SemanticSearchResult searchResult = search(strategy, evaluationCase.query(), maxK, documentId);
             double latencyMs = (nanoTime.getAsLong() - startedAt) / NANOS_PER_MILLISECOND;
             if (model == null) {
                 model = searchResult.model();
@@ -59,11 +66,17 @@ public class RetrievalEvaluationService {
         }
         List<Double> latencies = caseResults.stream().map(RetrievalEvaluationCaseResult::latencyMs).sorted().toList();
         return new RetrievalEvaluationReport(
-                dataset.name(), dataset.description(), model, documentId, caseResults.size(), maxK,
+                dataset.name(), dataset.description(), strategy, model, documentId, caseResults.size(), maxK,
                 caseResults.stream().mapToInt(RetrievalEvaluationCaseResult::candidateCount).average().orElse(0),
                 percentile(latencies, 0.50), percentile(latencies, 0.95),
                 dataset.cutoffs().stream().sorted().map(k -> metricAtK(caseResults, k)).toList(),
                 List.copyOf(caseResults));
+    }
+
+    private SemanticSearchResult search(RetrievalStrategy strategy, String query, int topK, UUID documentId) {
+        return strategy == RetrievalStrategy.HYBRID
+                ? hybridSearchService.search(query, topK, documentId)
+                : searchService.search(query, topK, documentId);
     }
 
     private RetrievalEvaluationCaseResult toCaseResult(
