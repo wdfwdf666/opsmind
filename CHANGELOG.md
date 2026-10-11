@@ -2,6 +2,31 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-013] 生成带引用的 Qwen RAG 回答
+
+- **日期**：2026-10-11
+- **类型**：功能 / RAG / 模型接入 / 安全
+- **状态**：已完成；Qwen HTTP 契约与本地真实端到端链路已验证
+- **关联需求或问题**：继续完成项目第 14 步；FEAT-012 只能返回检索结果，调用方仍需自行拼接上下文、调用 Chat 模型并解释来源，尚未形成用户可消费的问答接口。
+- **问题**：直接把 Top-K Child 文本拼给模型会丢失上下文并重复发送同一 Parent；自由文本回答可能没有来源或引用不存在的证据；文档正文还可能包含 Prompt Injection。没有证据时继续调用模型也会产生幻觉和无效费用。
+- **官方依据**：[阿里云百炼 Qwen 文本生成 API](https://help.aliyun.com/zh/model-studio/qwen-api-reference/)提供 OpenAI 兼容 Chat Completions 接口，使用 `model/messages` 生成回答并在 `usage` 返回 Token 用量。本项目默认 `qwen3.7-plus`，显式关闭 thinking 以控制首版延迟和成本边界。
+- **修改内容**：
+  - 新增 `AnswerGenerationProvider` 抽象、生产 `QwenChatAnswerGenerationProvider` 与仅供测试/演示的本地抽取 Provider；配置支持生成模型、独立 Base URL、证据数、上下文字符预算、输出 Token 上限和温度。
+  - 新增 `POST /api/v1/rag/answer`：复用精排检索，按 Parent ID 去重，优先把完整 Parent 正文交给生成模型，并在 12000 字符预算内截断。
+  - 证据使用 `S1/S2/...` 稳定编号；回答至少包含一个合法 `[S数字]`，未知编号、空回答或无引用回答均返回 `502 ANSWER_PROVIDER_INVALID_RESPONSE`；响应只携带实际使用的引用。
+  - 引用对象返回文档名、文档 ID、Child/Parent Chunk ID、标题路径、原文摘录和精排分数，便于前端展示与审计。
+  - 零证据时不调用生成模型，直接返回固定中文拒答；System Prompt 将 evidence JSON 视为不可信数据，禁止执行文档指令、改变角色或使用模型记忆补造内部事实。
+  - Qwen 使用 `{QWEN_CHAT_BASE_URL}/chat/completions`、Bearer 鉴权和 `enable_thinking=false`；缺少配置返回 503，上游异常映射为不含响应正文的 502，Token 用量随 API 响应返回。
+  - 新增应用服务测试、Qwen Mock HTTP 契约测试、OpenAPI 路径测试和文档上传至回答的 HTTP 端到端测试；新增 EVAL-004 工程验证报告。
+- **实现中发现的问题**：Reranker relevance score 只表示当前 Query-Passage 请求内的相对相关性，不适合未经校准就作为所有问题共用的拒答阈值，因此首版只在零证据时拒答。引用编号的语法校验也不能证明结论被证据蕴含，必须用独立 Faithfulness/Citation 指标评测，不能把“有引用”宣传成“无幻觉”。
+- **影响文件**：生成配置、RAG 应用模型与服务、Qwen/本地生成 Provider、RAG API、`.env.example`、测试配置、应用/HTTP/OpenAPI/Qwen 契约测试、`README.md`、`CHANGELOG.md`、EVAL-004 报告。
+- **验证方式**：执行 `\.\mvnw.cmd test`；使用 PostgreSQL 17.11 + pgvector 0.8.7 与三个本地确定性 Provider 启动真实应用，调用指定文档的 `/api/v1/rag/answer`；使用 Mock HTTP 服务验证 Qwen 请求与安全错误边界。
+- **验证结果**：54 个自动化测试通过，0 失败，0 错误。真实本地请求“回滚完成后如何确认核心功能正常？”返回 `[S1]`，命中 `feat007.md > OpsMind 运维手册 > 发布回滚`，引用成功回映到对应 Child、Parent 和文档。
+- **修改前指标**：3 个检索接口；48 个自动化测试；没有最终回答、引用校验、上下文预算、确定性拒答或 Chat 模型协议边界。
+- **修改后指标**：1 个带引用回答接口；2 个可切换生成 Provider；6 个新增测试；54 个自动化测试；1 份回答工程验证报告。
+- **修改效果**：项目从“可检索证据”升级为“可生成、可引用、可拒答、可审计来源”的 RAG 闭环，同时保持模型供应商适配与业务编排解耦。
+- **风险与后续**：真实 Qwen Chat 会产生费用并把所选证据发送到外部服务，本次未在没有数据外发授权的情况下执行。下一步扩充多文档问答/不可回答数据集，评测正确性、忠实度、引用精确率/召回率和拒答准确率，再校准低相关度拒答阈值并接入可观测指标。
+
 ## [FEAT-012] 接入 Qwen Cross-Encoder Reranker 精排
 
 - **日期**：2026-10-11

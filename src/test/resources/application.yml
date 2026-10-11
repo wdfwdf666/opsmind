@@ -41,4 +41,13 @@ opsmind:
     instruction: Retrieve passages that answer the question.
     candidate-multiplier: 4
     minimum-candidates: 20
+  generation:
+    provider: local
+    model: local-extractive-answer-v1
+    base-url:
+    api-key:
+    evidence-top-k: 5
+    max-context-characters: 12000
+    max-output-tokens: 1200
+    temperature: 0.1
 

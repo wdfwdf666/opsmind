@@ -53,6 +53,15 @@ opsmind:
     instruction: Given a user question, retrieve passages that answer the question.
     candidate-multiplier: 4
     minimum-candidates: 20
+  generation:
+    provider: ${GENERATION_PROVIDER:qwen}
+    model: ${QWEN_CHAT_MODEL:qwen3.7-plus}
+    base-url: ${QWEN_CHAT_BASE_URL:${QWEN_BASE_URL:}}
+    api-key: ${DASHSCOPE_API_KEY:}
+    evidence-top-k: 5
+    max-context-characters: 12000
+    max-output-tokens: 1200
+    temperature: 0.1
 
 server:
   shutdown: graceful

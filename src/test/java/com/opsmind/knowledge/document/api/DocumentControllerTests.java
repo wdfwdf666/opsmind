@@ -186,6 +186,18 @@ class DocumentControllerTests {
                 .andExpect(jsonPath("$.data.hits[0].headingPath").value(org.hamcrest.Matchers.containsString("数据库告警")))
                 .andExpect(jsonPath("$.data.hits[0].score").isNumber());
 
+        mockMvc.perform(post("/api/v1/rag/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"数据库连接池泄漏", "topK":1, "documentId":"%s"}
+                                """.formatted(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.refused").value(false))
+                .andExpect(jsonPath("$.data.generationModel").value("local-extractive-answer-v1"))
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("[S1]")))
+                .andExpect(jsonPath("$.data.citations[0].headingPath").value(org.hamcrest.Matchers.containsString("数据库告警")))
+                .andExpect(jsonPath("$.data.citations[0].chunkId").isNotEmpty());
+
         mockMvc.perform(post("/api/v1/search")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"query\":\"   \",\"topK\":5}"))

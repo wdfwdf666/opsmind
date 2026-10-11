@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 13 步：Qwen Cross-Encoder Reranker 精排（FEAT-012 / EVAL-003）**。
+当前完成 **第 14 步：Qwen 带引用 RAG 回答生成（FEAT-013 / EVAL-004）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -27,9 +27,11 @@
 - 已提供版本化检索语料、6 条固定中文查询和评测 API，自动计算 Recall@K、MRR@K、HitRate@K、P50/P95 延迟与逐用例排名；首份 Qwen/本地对照结果见 `evaluation/reports/EVAL-001-retrieval-baseline.md`。
 - 已实现中文字符 unigram/bigram BM25 与 pgvector Dense Top-K 双路召回，通过 RRF 融合且按 Chunk ID 去重；本地基线 Recall@1/MRR@1/HitRate@1 从 0.833 提升到 1.000，详见 `evaluation/reports/EVAL-002-hybrid-search.md`。
 - 已接入 `qwen3.7-text-rerank` 精排：混合检索先扩大候选池，再由 Query-Passage 相关性模型返回最终 Top-K；支持独立接口、错误脱敏、配置校验及 VECTOR/HYBRID/RERANKED 三策略评测。
+- 已接入 `qwen3.7-plus` Chat Completions：精排命中按 Parent 去重并在字符预算内组装证据，回答必须使用 `[S1]` 形式引用，API 只返回实际引用的来源；无任何证据时不调用模型并确定性拒答。
+- 生成提示把检索文本作为不可信 JSON 数据隔离，禁止执行文档内指令或使用模型记忆补造内部事实；Qwen 空响应、未知引用及无引用回答都会被拒绝并映射为脱敏的 502。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：48 个，全部通过。
+- 当前自动化测试：54 个，全部通过。
 
 本地验证：
 
@@ -45,11 +47,11 @@ docker compose -p opsmind up -d postgres
 
 ```powershell
 Copy-Item .env.example .env
-# 使用编辑器填写 DASHSCOPE_API_KEY、QWEN_BASE_URL 和 QWEN_RERANK_URL
+# 使用编辑器填写 DASHSCOPE_API_KEY、QWEN_BASE_URL、QWEN_RERANK_URL 和 QWEN_CHAT_BASE_URL
 .\mvnw.cmd spring-boot:run
 ```
 
-`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding 和 Rerank 的 HTTP 路径不同，必须分别配置 `QWEN_BASE_URL` 与 `QWEN_RERANK_URL`；不同地域的 URL 和 API Key 也不通用，请以[阿里云百炼向量化文档](https://help.aliyun.com/zh/model-studio/embedding)和[文本排序文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)为准。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER` 都改为 `local`；本地模型只用于测试基线，不能代表 Qwen 的语义效果。
+`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding、Rerank 与 Chat 的端点协议不同，分别使用 `QWEN_BASE_URL`、`QWEN_RERANK_URL` 与 `QWEN_CHAT_BASE_URL`；Chat URL 未配置时回退到 `QWEN_BASE_URL`，并在末尾追加 `/chat/completions`。不同地域的 URL 和 API Key 不通用，请以[阿里云百炼向量化文档](https://help.aliyun.com/zh/model-studio/embedding)、[文本排序文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)和[文本生成 API 文档](https://help.aliyun.com/zh/model-studio/qwen-api-reference/)为准。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER`、`GENERATION_PROVIDER` 都改为 `local`；本地 Provider 只用于确定性测试和链路演示，不能代表 Qwen 的语义效果。
 
 数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
 
@@ -72,6 +74,7 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 - 向量检索：`POST http://localhost:8080/api/v1/search`
 - 混合检索：`POST http://localhost:8080/api/v1/search/hybrid`
 - 混合召回 + 精排：`POST http://localhost:8080/api/v1/search/reranked`
+- 带引用 RAG 回答：`POST http://localhost:8080/api/v1/rag/answer`
 - 固定检索评测：`POST http://localhost:8080/api/v1/evaluations/retrieval/run`
 - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
 - OpenAPI JSON：`http://localhost:8080/v3/api-docs`
@@ -82,7 +85,7 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 ```
 
-上传响应中的 `documentId` 用于触发解析、分块、向量化和限定检索范围。在 Swagger UI 中可按“上传 → 触发解析 → 重建分块 → 重建向量 → 混合检索”的顺序完成调试。混合接口与向量接口使用相同请求体：
+上传响应中的 `documentId` 用于触发解析、分块、向量化和限定检索范围。在 Swagger UI 中可按“上传 → 触发解析 → 重建分块 → 重建向量 → 精排检索 → RAG 回答”的顺序完成调试。检索接口与 RAG 回答接口使用相同的三个输入字段：
 
 ```json
 {
@@ -92,11 +95,11 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 }
 ```
 
-评测接口可通过 `strategy` 选择 `VECTOR`、`HYBRID` 或 `RERANKED`；未提供时保持兼容，默认使用 `VECTOR`。正常问答链路优先使用 `/search/reranked`，`/search` 与 `/search/hybrid` 主要用于对照、降级和评测。
+RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型名和供应商 Token 用量。回答中的 `[S1]` 与 `citations[].sourceId` 对应，引用对象包含文档、Parent/Child Chunk、标题路径、片段和精排分数。评测接口可通过 `strategy` 选择 `VECTOR`、`HYBRID` 或 `RERANKED`；未提供时保持兼容，默认使用 `VECTOR`。`/search`、`/search/hybrid` 和 `/search/reranked` 主要用于检索调试、降级和对照，面向最终问答时使用 `/rag/answer`。
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：首版评测集只有 1 篇文档、3 个 Child Chunk 和 6 个查询，只能作为回归框架与小样本模型对照，不能代表生产准确率；Hybrid 已在该集合达到 Top-1 100%，所以当前数据无法证明 Reranker 的质量增益。P95 也只是 6 次顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，适合验证融合策略，不适合大规模生产；后续将迁移到 Elasticsearch/OpenSearch 倒排索引。Qwen 调用需要用户自己的阿里云百炼凭证并产生费用，当前 Provider 尚未把供应商 Token 用量写入可观测指标。下一步将扩展多文档困难样本，并实现带引用的 RAG 回答生成。
+当前限制：首版评测集只有 1 篇文档、3 个 Child Chunk 和 6 个查询，只能作为回归框架与小样本模型对照，不能代表生产准确率；Hybrid 已在该集合达到 Top-1 100%，所以当前数据无法证明 Reranker 的质量增益。P95 也只是 6 次顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，适合验证融合策略，不适合大规模生产；后续将迁移到 Elasticsearch/OpenSearch 倒排索引。当前拒答只覆盖“零证据”，尚未校准低相关度阈值；引用校验能发现缺失/越界来源编号，但还不能证明每个结论都被原文支持，需通过 Faithfulness 评测补齐。Qwen 调用需要用户自己的阿里云百炼凭证并产生费用，Token 用量已随单次响应返回，但尚未写入 Micrometer 指标。下一步将扩展多文档困难样本，建立回答正确性、忠实度与拒答率评测，并开始实现可审计的 Agent 工具调用。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 
