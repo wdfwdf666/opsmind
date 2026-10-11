@@ -7,6 +7,7 @@ import com.opsmind.evaluation.domain.RetrievalEvaluationReport;
 import com.opsmind.evaluation.domain.RetrievalMetricAtK;
 import com.opsmind.evaluation.domain.RetrievalStrategy;
 import com.opsmind.knowledge.document.application.HybridSearchService;
+import com.opsmind.knowledge.document.application.RerankedSearchService;
 import com.opsmind.knowledge.document.application.SemanticSearchService;
 import com.opsmind.knowledge.document.domain.SemanticSearchHit;
 import com.opsmind.knowledge.document.domain.SemanticSearchResult;
@@ -28,24 +29,28 @@ public class RetrievalEvaluationService {
     private final RetrievalEvaluationDatasetLoader datasetLoader;
     private final SemanticSearchService searchService;
     private final HybridSearchService hybridSearchService;
+    private final RerankedSearchService rerankedSearchService;
     private final LongSupplier nanoTime;
 
     @Autowired
     public RetrievalEvaluationService(
             RetrievalEvaluationDatasetLoader datasetLoader,
             SemanticSearchService searchService,
-            HybridSearchService hybridSearchService) {
-        this(datasetLoader, searchService, hybridSearchService, System::nanoTime);
+            HybridSearchService hybridSearchService,
+            RerankedSearchService rerankedSearchService) {
+        this(datasetLoader, searchService, hybridSearchService, rerankedSearchService, System::nanoTime);
     }
 
     RetrievalEvaluationService(
             RetrievalEvaluationDatasetLoader datasetLoader,
             SemanticSearchService searchService,
             HybridSearchService hybridSearchService,
+            RerankedSearchService rerankedSearchService,
             LongSupplier nanoTime) {
         this.datasetLoader = datasetLoader;
         this.searchService = searchService;
         this.hybridSearchService = hybridSearchService;
+        this.rerankedSearchService = rerankedSearchService;
         this.nanoTime = nanoTime;
     }
 
@@ -74,9 +79,11 @@ public class RetrievalEvaluationService {
     }
 
     private SemanticSearchResult search(RetrievalStrategy strategy, String query, int topK, UUID documentId) {
-        return strategy == RetrievalStrategy.HYBRID
-                ? hybridSearchService.search(query, topK, documentId)
-                : searchService.search(query, topK, documentId);
+        return switch (strategy) {
+            case VECTOR -> searchService.search(query, topK, documentId);
+            case HYBRID -> hybridSearchService.search(query, topK, documentId);
+            case RERANKED -> rerankedSearchService.search(query, topK, documentId);
+        };
     }
 
     private RetrievalEvaluationCaseResult toCaseResult(

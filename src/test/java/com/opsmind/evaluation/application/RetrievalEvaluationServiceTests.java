@@ -4,6 +4,7 @@ import com.opsmind.evaluation.domain.RetrievalEvaluationCase;
 import com.opsmind.evaluation.domain.RetrievalEvaluationDataset;
 import com.opsmind.evaluation.domain.RetrievalStrategy;
 import com.opsmind.knowledge.document.application.HybridSearchService;
+import com.opsmind.knowledge.document.application.RerankedSearchService;
 import com.opsmind.knowledge.document.application.SemanticSearchService;
 import com.opsmind.knowledge.document.domain.SemanticSearchHit;
 import com.opsmind.knowledge.document.domain.SemanticSearchResult;
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RetrievalEvaluationServiceTests {
@@ -25,6 +27,7 @@ class RetrievalEvaluationServiceTests {
         RetrievalEvaluationDatasetLoader loader = mock(RetrievalEvaluationDatasetLoader.class);
         SemanticSearchService searchService = mock(SemanticSearchService.class);
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankedSearchService rerankedSearchService = mock(RerankedSearchService.class);
         var dataset = new RetrievalEvaluationDataset(
                 "test-dataset", "deterministic metrics", List.of(1, 3), List.of(
                 new RetrievalEvaluationCase("case-1", "query one", List.of("Expected A")),
@@ -37,7 +40,8 @@ class RetrievalEvaluationServiceTests {
         long[] timestamps = {0, 10_000_000, 20_000_000, 50_000_000};
         AtomicInteger timestampIndex = new AtomicInteger();
         var service = new RetrievalEvaluationService(
-                loader, searchService, hybridSearchService, () -> timestamps[timestampIndex.getAndIncrement()]);
+                loader, searchService, hybridSearchService, rerankedSearchService,
+                () -> timestamps[timestampIndex.getAndIncrement()]);
 
         var report = service.run("test-dataset", documentId, RetrievalStrategy.VECTOR);
 
@@ -58,6 +62,32 @@ class RetrievalEvaluationServiceTests {
         assertThat(report.metrics().get(1).hitRate()).isEqualTo(0.5);
         assertThat(report.cases().getFirst().firstRelevantRank()).isEqualTo(2);
         assertThat(report.cases().get(1).firstRelevantRank()).isNull();
+    }
+
+    @Test
+    void shouldRouteRerankedEvaluationToRerankedSearchService() {
+        UUID documentId = UUID.randomUUID();
+        RetrievalEvaluationDatasetLoader loader = mock(RetrievalEvaluationDatasetLoader.class);
+        SemanticSearchService searchService = mock(SemanticSearchService.class);
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankedSearchService rerankedSearchService = mock(RerankedSearchService.class);
+        var dataset = new RetrievalEvaluationDataset(
+                "test-dataset", "reranked strategy", List.of(1),
+                List.of(new RetrievalEvaluationCase("case-1", "query", List.of("Expected"))));
+        when(loader.load("test-dataset")).thenReturn(dataset);
+        when(rerankedSearchService.search("query", 1, documentId)).thenReturn(
+                searchResult(documentId, hit("Expected", 0.95)));
+        long[] timestamps = {0, 1_000_000};
+        AtomicInteger timestampIndex = new AtomicInteger();
+        var service = new RetrievalEvaluationService(
+                loader, searchService, hybridSearchService, rerankedSearchService,
+                () -> timestamps[timestampIndex.getAndIncrement()]);
+
+        var report = service.run("test-dataset", documentId, RetrievalStrategy.RERANKED);
+
+        assertThat(report.strategy()).isEqualTo(RetrievalStrategy.RERANKED);
+        assertThat(report.metrics().getFirst().hitRate()).isEqualTo(1);
+        verify(rerankedSearchService).search("query", 1, documentId);
     }
 
     private SemanticSearchResult searchResult(UUID documentId, SemanticSearchHit... hits) {

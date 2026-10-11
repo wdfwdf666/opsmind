@@ -2,6 +2,7 @@ package com.opsmind.knowledge.document.api;
 
 import com.opsmind.common.api.ApiResponse;
 import com.opsmind.knowledge.document.application.HybridSearchService;
+import com.opsmind.knowledge.document.application.RerankedSearchService;
 import com.opsmind.knowledge.document.application.SemanticSearchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -19,10 +20,15 @@ public class SemanticSearchController {
 
     private final SemanticSearchService searchService;
     private final HybridSearchService hybridSearchService;
+    private final RerankedSearchService rerankedSearchService;
 
-    public SemanticSearchController(SemanticSearchService searchService, HybridSearchService hybridSearchService) {
+    public SemanticSearchController(
+            SemanticSearchService searchService,
+            HybridSearchService hybridSearchService,
+            RerankedSearchService rerankedSearchService) {
         this.searchService = searchService;
         this.hybridSearchService = hybridSearchService;
+        this.rerankedSearchService = rerankedSearchService;
     }
 
     @PostMapping
@@ -54,5 +60,25 @@ public class SemanticSearchController {
     public ApiResponse<SemanticSearchResponse> hybridSearch(@RequestBody SemanticSearchRequest request) {
         return ApiResponse.success(SemanticSearchResponse.from(
                 hybridSearchService.search(request.query(), request.topK(), request.documentId())));
+    }
+
+    @PostMapping("/reranked")
+    @Operation(
+            summary = "Search and rerank knowledge chunks",
+            description = "Runs hybrid retrieval, then uses the configured reranker to score query-passage relevance. "
+                    + "The returned score is the rerank relevance score and must not be compared across requests.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200", description = "Reranked search results"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400", description = "Invalid query or topK", content = @Content),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "502", description = "Reranking provider failed", content = @Content),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "503", description = "Reranking provider is not configured", content = @Content)
+    })
+    public ApiResponse<SemanticSearchResponse> rerankedSearch(@RequestBody SemanticSearchRequest request) {
+        return ApiResponse.success(SemanticSearchResponse.from(
+                rerankedSearchService.search(request.query(), request.topK(), request.documentId())));
     }
 }

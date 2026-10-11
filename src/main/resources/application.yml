@@ -45,6 +45,14 @@ opsmind:
       rrf-k: 60
       candidate-multiplier: 4
       minimum-candidates: 20
+  reranking:
+    provider: ${RERANKING_PROVIDER:qwen}
+    model: ${QWEN_RERANKING_MODEL:qwen3.7-text-rerank}
+    endpoint: ${QWEN_RERANK_URL:}
+    api-key: ${DASHSCOPE_API_KEY:}
+    instruction: Given a user question, retrieve passages that answer the question.
+    candidate-multiplier: 4
+    minimum-candidates: 20
 
 server:
   shutdown: graceful

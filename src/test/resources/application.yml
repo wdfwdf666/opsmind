@@ -33,4 +33,12 @@ opsmind:
       rrf-k: 60
       candidate-multiplier: 4
       minimum-candidates: 20
+  reranking:
+    provider: local
+    model: local-token-overlap-reranker-v1
+    endpoint:
+    api-key:
+    instruction: Retrieve passages that answer the question.
+    candidate-multiplier: 4
+    minimum-candidates: 20
 

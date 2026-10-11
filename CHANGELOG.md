@@ -2,6 +2,30 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-012] 接入 Qwen Cross-Encoder Reranker 精排
+
+- **日期**：2026-10-11
+- **类型**：功能 / RAG / 模型接入 / 评测
+- **状态**：已完成；Qwen HTTP 契约已验证，本地端到端评测已完成
+- **关联需求或问题**：继续完成项目第 13 步；FEAT-011 的 RRF 只能融合候选名次，不会联合理解用户问题和候选段落，难以区分“主题相关”与“真正回答问题”。
+- **问题**：Dense/BM25 属于高召回阶段，RRF 分数只由名次产生；若直接把少量 RRF Top-K 交给生成模型，困难负样本可能占用上下文预算。Embedding 与 Rerank 又使用不同协议和 URL，不能复用同一个调用实现。
+- **官方依据**：[阿里云百炼文本排序文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)说明 `qwen3.7-text-rerank` 面向语义检索和 RAG，最多处理 500 个文档；请求使用 `input.query/documents` 和 `parameters.top_n/instruct`，响应通过原始 `index` 与 `relevance_score` 关联候选。
+- **修改内容**：
+  - 新增 `RerankingProvider` 抽象以及生产 `QwenRerankingProvider`，默认模型为 `qwen3.7-text-rerank`；新增本地 Token Overlap Provider 供离线测试，不冒充生产 Cross-Encoder。
+  - 新增独立 `QWEN_RERANK_URL`；不从 Embedding URL 猜测路径。缺少 URL/Key 返回 503，上游 HTTP/网络错误映射为脱敏 502。
+  - 严格校验返回结果数量、候选索引范围、重复索引、有限分数及 0~1 范围，再按原始索引映射回 Chunk，避免模型结果与候选错位。
+  - 新增 `RerankedSearchService`：先按 `max(20, topK×4)` 获取混合候选，再精排并截取用户请求的 Top-K；最终保留 Child 命中、Parent 上下文和来源字段。
+  - 新增 `POST /api/v1/search/reranked`；score 表示当前请求内的 Rerank 相关性，不允许与余弦或 RRF 分数直接比较。
+  - 评测策略扩展为 `VECTOR/HYBRID/RERANKED`，新增 EVAL-003 报告和 OpenAPI、服务编排、Qwen HTTP 契约、错误脱敏及端到端接口测试。
+- **实现中发现的问题**：官方 `qwen3-rerank` 与 `qwen3.7-text-rerank` 的 URL、请求体和响应结构不同；本项目选用后者并按其 DashScope 嵌套协议实现。现有 3 候选/6 查询数据集在 Hybrid 阶段已达到 Top-1 100%，无法展示精排质量增益，因此没有虚构提升数字。
+- **影响文件**：Reranker 配置与 Provider、重排应用服务、搜索 API、评测策略、Qwen 契约测试、服务与 HTTP 集成测试、`.env.example`、`README.md`、`CHANGELOG.md`、EVAL-003 报告。
+- **验证方式**：执行 `\.\mvnw.cmd test`；使用 PostgreSQL 17.11 + pgvector 0.8.7、本地 Embedding 和本地确定性 Reranker，调用真实 `RERANKED` 评测接口；Mock HTTP 服务验证 Qwen 请求 JSON、Bearer 鉴权、乱序候选索引恢复和上游错误脱敏。
+- **验证结果**：48 个自动化测试通过，0 失败，0 错误。RERANKED 的 Recall@1/MRR@1/HitRate@1 与 @3 三项均为 1.000，P50/P95 为 2.57/42.06 ms；与 Hybrid 相比质量持平，符合当前数据集已经饱和的预期。
+- **修改前指标**：Dense + BM25 + RRF 后直接返回；43 个测试；评测仅支持 VECTOR/HYBRID。
+- **修改后指标**：增加独立精排阶段、3 类评测策略、1 份精排报告、48 个测试；供应商错误和候选索引均有防御性校验。
+- **修改效果**：项目形成“宽召回 → RRF 融合 → 精排 → Parent 上下文”的完整多阶段检索结构，为下一步带引用的 RAG 生成提供更干净的证据集合。
+- **风险与后续**：真实 Qwen 调用会发送 Query 和候选 Child 文本并产生费用，需要明确的数据外发授权；当前未执行真实 Qwen 质量评测。下一步扩展多文档困难负样本，并实现带来源引用、无证据拒答的 Qwen Chat 回答接口。
+
 ## [FEAT-011] 增加 BM25 + pgvector + RRF 混合检索
 
 - **日期**：2026-10-10
