@@ -15,9 +15,28 @@ public interface AgentAuditRepository {
 
     void complete(UUID runId, RagAnswerResult answer, Instant completedAt);
 
+    void requestApproval(
+            UUID runId,
+            RagAnswerResult evidence,
+            AgentApproval approval,
+            AgentStep approvalStep,
+            Instant updatedAt);
+
+    boolean decideApproval(
+            UUID runId,
+            AgentApprovalStatus decision,
+            String decisionReason,
+            Instant decidedAt);
+
+    void completeWrite(UUID runId, String answer, Instant completedAt);
+
+    void reject(UUID runId, String answer, Instant completedAt);
+
     void fail(UUID runId, String errorCode, String errorMessage, Instant completedAt);
 
     Optional<AgentRun> findRun(UUID runId);
+
+    Optional<AgentApproval> findApproval(UUID runId);
 
     List<AgentStep> findSteps(UUID runId);
 }

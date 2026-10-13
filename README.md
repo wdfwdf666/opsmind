@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 17 步：可审计的只读 Agent 运行闭环（FEAT-016 / VERIFY-002）**。
+当前完成 **第 18 步：写工具与 Human-in-the-loop 审批闭环（FEAT-017 / VERIFY-003）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -33,12 +33,15 @@
 - `faithfulnessProxy` 使用回答与所引原文的字符 bigram 覆盖率提供确定性回归信号，字段名明确标注为 Proxy，不把词面重合冒充语义忠实度；EVAL-005 已暴露当前拒答 F1 为 0 的真实缺陷。
 - 已新增生成前证据充足性门禁：Top-1 精排分数低于 `MINIMUM_EVIDENCE_SCORE` 时不调用 Chat 模型，返回 `LOW_RELEVANCE`、实际 `topEvidenceScore` 和确定性拒答；本地初始阈值 0.15 使 v2 拒答 F1 从 0 提升到 1.0。
 - 已实现首个确定性 Agent 状态机：`RECEIVED → PLANNED → TOOL_CALL → RESPONDED`，通过只读 `knowledge_search` 工具复用完整 RAG 回答链路。
-- 已实现工具风险分级：`READ_ONLY` 可自动执行，`WRITE_REQUIRES_APPROVAL` 与 `PROHIBITED` 不进入工具执行；当前 API 只暴露只读知识检索工具。
+- 已实现工具风险分级：`READ_ONLY` 可自动执行，`WRITE_REQUIRES_APPROVAL` 仅在批准后执行，`PROHIBITED` 始终阻断。
 - 已通过 Flyway V6 持久化 `agent_run` 与 `agent_step`，保存运行状态、拒答原因、引用、工具风险和脱敏步骤元数据；支持按 Run ID 回读完整有序审计轨迹。
 - Agent 与 RAG Swagger 示例默认不传 `documentId`，由检索链路自动跨文档选择；该字段只用于调试或评测时限定单文档范围。
+- 已新增 `CREATE_TICKET` 任务：先自动调用只读 `knowledge_search` 生成 P2 工单草稿，再进入 `WAITING_APPROVAL`；审批前不会执行 `create_ticket` 写工具。
+- 已新增批准/拒绝接口；批准操作在同一数据库事务中更新审批、创建工单、追加审计步骤并完成 Run，拒绝则结束且不创建工单。`support_ticket.agent_run_id` 唯一约束保证每个 Run 最多一张工单，重复提交相同决定返回原结果。
+- 已通过 Flyway V7 持久化 `agent_approval`、`support_ticket` 和 `agent_run.task_type`；审批响应直接返回草稿、风险、决定、工单和完整状态轨迹。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：65 个，全部通过。
+- 当前自动化测试：71 个，全部通过。
 
 本地验证：
 
@@ -84,6 +87,7 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 - 带引用 RAG 回答：`POST http://localhost:8080/api/v1/rag/answer`
 - 启动只读 Agent：`POST http://localhost:8080/api/v1/agent/runs`
 - 查看 Agent 运行与审计：`GET http://localhost:8080/api/v1/agent/runs/{runId}`
+- 批准或拒绝写工具：`POST http://localhost:8080/api/v1/agent/runs/{runId}/approval`
 - 固定检索评测：`POST http://localhost:8080/api/v1/evaluations/retrieval/run`
 - 固定回答评测：`POST http://localhost:8080/api/v1/evaluations/answers/run`
 - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
@@ -103,6 +107,26 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 }
 ```
 
+创建工单采用显式任务类型，避免首版依赖关键词猜测意图：
+
+```json
+{
+  "query": "数据库连接池持续告警，请创建 P2 工单",
+  "taskType": "CREATE_TICKET"
+}
+```
+
+首次响应为 `WAITING_APPROVAL`，其中 `approval.draft` 是待确认草稿。取得 `runId` 后调用审批接口：
+
+```json
+{
+  "decision": "APPROVE",
+  "reason": "已确认影响范围，同意创建"
+}
+```
+
+也可传入 `decision=REJECT`。批准后状态为 `COMPLETED` 并返回 `ticket`；拒绝后状态为 `REJECTED` 且 `ticket` 为空。同一 Run 重复提交相同决定不会重复创建工单，相反决定返回状态冲突。
+
 仅在排查某篇文档、做单文档评测或复现实验时才传 `documentId`：
 
 ```json
@@ -121,7 +145,7 @@ RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型�
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未获得数据外发授权验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。当前 Agent 是确定性单工具编排，还没有 Qwen Planner、多工具循环、运行预算、写工具审批与失败恢复。下一步实现工单草稿写工具和持久化审批状态，再引入结构化 Planner。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未完成独立数据集验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。当前 Agent 仍是显式 `taskType` 的确定性编排，审批也没有绑定登录用户、RBAC 或过期时间；多实例并发重复请求可能得到一次 409，但数据库唯一约束仍会阻止重复工单。下一步增加认证身份、审批权限/租约和操作人审计，再接入 Qwen 结构化 Planner 与运行预算。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 
@@ -282,7 +306,7 @@ RECEIVED
 - 工具调用使用 `requestId` 做幂等，超时采用指数退避；不可重试的业务异常直接交回 Planner。
 - 通过 MCP 暴露“搜索知识库”和“查询工单”能力，同时保留普通 Function Calling 版本做对比。
 
-当前已落地的最小子集是 `RECEIVED → PLANNED → TOOL_CALL → RESPONDED`：Planner 暂为确定性路由，只调用 `knowledge_search`；每次运行和步骤均落库。下表其余工具、循环预算、审批恢复和 MCP 属于后续迭代目标。
+当前已落地两条确定性状态流：知识问答执行 `RECEIVED → PLANNED → TOOL_CALL → RESPONDED`；工单任务执行 `RECEIVED → PLANNED → TOOL_CALL → APPROVAL_REQUESTED → APPROVED/REJECTED → TOOL_CALL → RESPONDED`。已实现 `knowledge_search` 和 `create_ticket`，每次运行、审批、工单和步骤均落库。意图分类、循环预算、登录用户审批权限、失败恢复和 MCP 属于后续迭代目标。
 
 首期工具：
 

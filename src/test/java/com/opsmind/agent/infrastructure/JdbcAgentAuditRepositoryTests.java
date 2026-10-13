@@ -1,11 +1,16 @@
 package com.opsmind.agent.infrastructure;
 
 import com.opsmind.agent.domain.AgentAuditRepository;
+import com.opsmind.agent.domain.AgentApproval;
+import com.opsmind.agent.domain.AgentApprovalStatus;
 import com.opsmind.agent.domain.AgentRun;
 import com.opsmind.agent.domain.AgentRunStatus;
 import com.opsmind.agent.domain.AgentStep;
 import com.opsmind.agent.domain.AgentStepType;
+import com.opsmind.agent.domain.AgentTaskType;
 import com.opsmind.agent.domain.AgentToolRisk;
+import com.opsmind.agent.domain.TicketDraft;
+import com.opsmind.agent.domain.TicketPriority;
 import com.opsmind.rag.application.RagAnswerResult;
 import com.opsmind.rag.application.RagCitation;
 import org.junit.jupiter.api.Test;
@@ -30,7 +35,7 @@ class JdbcAgentAuditRepositoryTests {
         UUID documentId = UUID.randomUUID();
         Instant createdAt = Instant.parse("2026-10-13T05:00:00Z");
         repository.create(new AgentRun(
-                runId, "自动选择文档", null, AgentRunStatus.RUNNING,
+                runId, "自动选择文档", null, AgentTaskType.KNOWLEDGE_QA, AgentRunStatus.RUNNING,
                 null, null, null, null, List.of(), null, null, createdAt, createdAt, null));
         repository.appendStep(new AgentStep(
                 UUID.randomUUID(), runId, 1, AgentStepType.RECEIVED,
@@ -62,7 +67,7 @@ class JdbcAgentAuditRepositoryTests {
         UUID runId = UUID.randomUUID();
         Instant now = Instant.parse("2026-10-13T05:10:00Z");
         repository.create(new AgentRun(
-                runId, "失败请求", null, AgentRunStatus.RUNNING,
+                runId, "失败请求", null, AgentTaskType.KNOWLEDGE_QA, AgentRunStatus.RUNNING,
                 null, null, null, null, List.of(), null, null, now, now, null));
         repository.appendStep(new AgentStep(
                 UUID.randomUUID(), runId, 1, AgentStepType.TOOL_CALL,
@@ -75,5 +80,39 @@ class JdbcAgentAuditRepositoryTests {
         assertThat(stored.status()).isEqualTo(AgentRunStatus.FAILED);
         assertThat(stored.errorMessage()).isEqualTo("Agent execution failed");
         assertThat(stored.citations()).isEmpty();
+    }
+
+    @Test
+    void shouldPersistPendingApprovalAndDecision() {
+        UUID runId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-10-13T05:20:00Z");
+        repository.create(new AgentRun(
+                runId, "创建告警工单", null, AgentTaskType.CREATE_TICKET, AgentRunStatus.RUNNING,
+                null, null, null, null, List.of(), null, null, now, now, null));
+        RagAnswerResult evidence = new RagAnswerResult(
+                "创建告警工单", null, "retrieval", "generation", false,
+                null, 0.7, "先检查连接池 [S1]", List.of(), 1, 1, 2);
+        AgentApproval approval = new AgentApproval(
+                UUID.randomUUID(), runId, "create_ticket", AgentToolRisk.WRITE_REQUIRES_APPROVAL,
+                AgentApprovalStatus.PENDING,
+                new TicketDraft("连接池告警", "用户描述与知识库建议", TicketPriority.P2),
+                null, now, null);
+
+        AgentStep approvalStep = new AgentStep(
+                UUID.randomUUID(), runId, 1, AgentStepType.APPROVAL_REQUESTED,
+                "create_ticket", AgentToolRisk.WRITE_REQUIRES_APPROVAL, true,
+                "{\"approval\":\"requested\"}", now.plusSeconds(1));
+        repository.requestApproval(runId, evidence, approval, approvalStep, now.plusSeconds(1));
+        boolean decided = repository.decideApproval(
+                runId, AgentApprovalStatus.APPROVED, "确认创建", now.plusSeconds(2));
+
+        assertThat(decided).isTrue();
+        assertThat(repository.findRun(runId).orElseThrow().status()).isEqualTo(AgentRunStatus.WAITING_APPROVAL);
+        assertThat(repository.findApproval(runId).orElseThrow())
+                .satisfies(stored -> {
+                    assertThat(stored.status()).isEqualTo(AgentApprovalStatus.APPROVED);
+                    assertThat(stored.draft()).isEqualTo(approval.draft());
+                    assertThat(stored.decisionReason()).isEqualTo("确认创建");
+                });
     }
 }

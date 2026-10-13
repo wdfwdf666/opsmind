@@ -1,13 +1,11 @@
 package com.opsmind.agent.application;
 
 import com.opsmind.agent.domain.AgentToolRisk;
-import com.opsmind.rag.application.RagAnswerResult;
-
-public interface AgentTool {
+public interface AgentTool<I, O> {
 
     String name();
 
     AgentToolRisk risk();
 
-    RagAnswerResult execute(AgentToolInput input);
+    O execute(I input);
 }

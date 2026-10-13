@@ -2,6 +2,8 @@ package com.opsmind.agent.application;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.opsmind.agent.domain.AgentApproval;
+import com.opsmind.agent.domain.AgentApprovalStatus;
 import com.opsmind.agent.domain.AgentAuditRepository;
 import com.opsmind.agent.domain.AgentException;
 import com.opsmind.agent.domain.AgentRun;
@@ -9,10 +11,16 @@ import com.opsmind.agent.domain.AgentRunStatus;
 import com.opsmind.agent.domain.AgentRunView;
 import com.opsmind.agent.domain.AgentStep;
 import com.opsmind.agent.domain.AgentStepType;
+import com.opsmind.agent.domain.AgentTaskType;
+import com.opsmind.agent.domain.SupportTicket;
+import com.opsmind.agent.domain.SupportTicketRepository;
+import com.opsmind.agent.domain.TicketDraft;
+import com.opsmind.agent.domain.TicketPriority;
 import com.opsmind.rag.application.RagAnswerResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -25,9 +33,14 @@ import java.util.function.Supplier;
 public class AgentRunService {
 
     private static final int MAX_QUERY_CHARACTERS = 1000;
+    private static final int MAX_DECISION_REASON_CHARACTERS = 500;
+    private static final int MAX_TICKET_TITLE_CHARACTERS = 180;
+    private static final int MAX_TICKET_DESCRIPTION_CHARACTERS = 6000;
 
     private final AgentAuditRepository auditRepository;
-    private final AgentTool knowledgeSearchTool;
+    private final SupportTicketRepository ticketRepository;
+    private final AgentTool<AgentToolInput, RagAnswerResult> knowledgeSearchTool;
+    private final AgentTool<CreateTicketInput, SupportTicket> createTicketTool;
     private final AgentToolPolicy toolPolicy;
     private final Clock clock;
     private final Supplier<UUID> idSupplier;
@@ -36,20 +49,28 @@ public class AgentRunService {
     @Autowired
     public AgentRunService(
             AgentAuditRepository auditRepository,
+            SupportTicketRepository ticketRepository,
             KnowledgeSearchAgentTool knowledgeSearchTool,
+            CreateTicketAgentTool createTicketTool,
             AgentToolPolicy toolPolicy) {
-        this(auditRepository, knowledgeSearchTool, toolPolicy, Clock.systemUTC(), UUID::randomUUID, new ObjectMapper());
+        this(
+                auditRepository, ticketRepository, knowledgeSearchTool, createTicketTool, toolPolicy,
+                Clock.systemUTC(), UUID::randomUUID, new ObjectMapper());
     }
 
     AgentRunService(
             AgentAuditRepository auditRepository,
-            AgentTool knowledgeSearchTool,
+            SupportTicketRepository ticketRepository,
+            AgentTool<AgentToolInput, RagAnswerResult> knowledgeSearchTool,
+            AgentTool<CreateTicketInput, SupportTicket> createTicketTool,
             AgentToolPolicy toolPolicy,
             Clock clock,
             Supplier<UUID> idSupplier,
             ObjectMapper objectMapper) {
         this.auditRepository = auditRepository;
+        this.ticketRepository = ticketRepository;
         this.knowledgeSearchTool = knowledgeSearchTool;
+        this.createTicketTool = createTicketTool;
         this.toolPolicy = toolPolicy;
         this.clock = clock;
         this.idSupplier = idSupplier;
@@ -57,40 +78,81 @@ public class AgentRunService {
     }
 
     public AgentRunView start(String rawQuery, UUID documentId) {
+        return start(rawQuery, documentId, AgentTaskType.KNOWLEDGE_QA);
+    }
+
+    public AgentRunView start(String rawQuery, UUID documentId, AgentTaskType requestedTaskType) {
         String query = validateQuery(rawQuery);
+        AgentTaskType taskType = requestedTaskType == null ? AgentTaskType.KNOWLEDGE_QA : requestedTaskType;
         UUID runId = idSupplier.get();
         Instant now = clock.instant();
         auditRepository.create(new AgentRun(
-                runId, query, documentId, AgentRunStatus.RUNNING, null, null, null, null, List.of(),
-                null, null, now, now, null));
+                runId, query, documentId, taskType, AgentRunStatus.RUNNING,
+                null, null, null, null, List.of(), null, null, now, now, null));
         append(runId, 1, AgentStepType.RECEIVED, null, true,
-                Map.of("queryCharacters", query.length(), "scope", documentId == null ? "ALL_DOCUMENTS" : "DOCUMENT"));
-        append(runId, 2, AgentStepType.PLANNED, knowledgeSearchTool, true,
-                Map.of("strategy", "DETERMINISTIC_SINGLE_TOOL", "tool", knowledgeSearchTool.name()));
-
-        RagAnswerResult answer;
-        try {
-            toolPolicy.requireAutoExecutable(knowledgeSearchTool);
-            answer = knowledgeSearchTool.execute(new AgentToolInput(query, documentId));
-        } catch (RuntimeException exception) {
-            String code = exception instanceof AgentException agentException
-                    ? agentException.code()
-                    : "AGENT_TOOL_EXECUTION_FAILED";
-            append(runId, 3, AgentStepType.TOOL_CALL, knowledgeSearchTool, false,
-                    Map.of("errorCode", code));
-            auditRepository.fail(runId, code, "Agent execution failed", clock.instant());
-            throw new AgentException(
-                    "AGENT_RUN_FAILED", "Agent run failed; runId=" + runId, HttpStatus.BAD_GATEWAY);
-        }
-        append(runId, 3, AgentStepType.TOOL_CALL, knowledgeSearchTool, true,
                 Map.of(
-                        "refused", answer.refused(),
-                        "refusalReason", answer.refusalReason() == null ? "" : answer.refusalReason().name(),
-                        "citationCount", answer.citations().size(),
-                        "topEvidenceScore", answer.topEvidenceScore() == null ? -1 : answer.topEvidenceScore()));
-        append(runId, 4, AgentStepType.RESPONDED, null, true,
-                Map.of("answerCharacters", answer.answer().length(), "totalTokens", value(answer.totalTokens())));
-        auditRepository.complete(runId, answer, clock.instant());
+                        "queryCharacters", query.length(),
+                        "scope", documentId == null ? "ALL_DOCUMENTS" : "DOCUMENT",
+                        "taskType", taskType.name()));
+
+        return switch (taskType) {
+            case KNOWLEDGE_QA -> startKnowledgeRun(runId, query, documentId);
+            case CREATE_TICKET -> startTicketRun(runId, query, documentId);
+        };
+    }
+
+    @Transactional
+    public AgentRunView decide(UUID runId, AgentApprovalStatus decision, String rawReason) {
+        if (decision == null || decision == AgentApprovalStatus.PENDING) {
+            throw new AgentException(
+                    "AGENT_APPROVAL_DECISION_INVALID",
+                    "Approval decision must be APPROVED or REJECTED",
+                    HttpStatus.BAD_REQUEST);
+        }
+        String reason = validateDecisionReason(rawReason);
+        AgentRunView current = get(runId);
+        if (current.run().taskType() != AgentTaskType.CREATE_TICKET || current.approval() == null) {
+            throw new AgentException(
+                    "AGENT_APPROVAL_NOT_APPLICABLE",
+                    "Agent run does not contain a pending write tool",
+                    HttpStatus.CONFLICT);
+        }
+        if (isSameCompletedDecision(current, decision)) {
+            return current;
+        }
+        if (current.run().status() != AgentRunStatus.WAITING_APPROVAL
+                || current.approval().status() != AgentApprovalStatus.PENDING) {
+            throw new AgentException(
+                    "AGENT_APPROVAL_ALREADY_DECIDED",
+                    "Agent approval has already been decided",
+                    HttpStatus.CONFLICT);
+        }
+
+        Instant decidedAt = clock.instant();
+        if (!auditRepository.decideApproval(runId, decision, reason, decidedAt)) {
+            throw new AgentException(
+                    "AGENT_APPROVAL_CONCURRENT_UPDATE",
+                    "Agent approval was changed by another request",
+                    HttpStatus.CONFLICT);
+        }
+
+        if (decision == AgentApprovalStatus.REJECTED) {
+            append(runId, 5, AgentStepType.REJECTED, createTicketTool, true,
+                    Map.of("reasonProvided", reason != null));
+            auditRepository.reject(runId, "工单创建已被审批人拒绝。", decidedAt);
+            return get(runId);
+        }
+
+        toolPolicy.requireApprovedExecutable(createTicketTool);
+        append(runId, 5, AgentStepType.APPROVED, createTicketTool, true,
+                Map.of("reasonProvided", reason != null));
+        SupportTicket ticket = createTicketTool.execute(new CreateTicketInput(runId, current.approval().draft()));
+        append(runId, 6, AgentStepType.TOOL_CALL, createTicketTool, true,
+                Map.of("ticketId", ticket.id(), "ticketStatus", ticket.status().name()));
+        String answer = "工单已创建，编号：" + ticket.id();
+        append(runId, 7, AgentStepType.RESPONDED, null, true,
+                Map.of("answerCharacters", answer.length()));
+        auditRepository.completeWrite(runId, answer, clock.instant());
         return get(runId);
     }
 
@@ -98,20 +160,104 @@ public class AgentRunService {
         AgentRun run = auditRepository.findRun(runId)
                 .orElseThrow(() -> new AgentException(
                         "AGENT_RUN_NOT_FOUND", "Agent run not found: " + runId, HttpStatus.NOT_FOUND));
-        return new AgentRunView(run, auditRepository.findSteps(runId));
+        return new AgentRunView(
+                run,
+                auditRepository.findSteps(runId),
+                auditRepository.findApproval(runId).orElse(null),
+                ticketRepository.findByRunId(runId).orElse(null));
+    }
+
+    private AgentRunView startKnowledgeRun(UUID runId, String query, UUID documentId) {
+        append(runId, 2, AgentStepType.PLANNED, knowledgeSearchTool, true,
+                Map.of("strategy", "DETERMINISTIC_SINGLE_TOOL", "tool", knowledgeSearchTool.name()));
+        RagAnswerResult answer = executeKnowledge(runId, query, documentId, 3);
+        append(runId, 4, AgentStepType.RESPONDED, null, true,
+                Map.of("answerCharacters", answer.answer().length(), "totalTokens", value(answer.totalTokens())));
+        auditRepository.complete(runId, answer, clock.instant());
+        return get(runId);
+    }
+
+    private AgentRunView startTicketRun(UUID runId, String query, UUID documentId) {
+        append(runId, 2, AgentStepType.PLANNED, null, true,
+                Map.of(
+                        "strategy", "DETERMINISTIC_APPROVAL_FLOW",
+                        "readTool", knowledgeSearchTool.name(),
+                        "writeTool", createTicketTool.name()));
+        RagAnswerResult evidence = executeKnowledge(runId, query, documentId, 3);
+        TicketDraft draft = ticketDraft(query, evidence);
+        Instant requestedAt = clock.instant();
+        AgentApproval approval = new AgentApproval(
+                idSupplier.get(), runId, createTicketTool.name(), createTicketTool.risk(),
+                AgentApprovalStatus.PENDING, draft, null, requestedAt, null);
+        AgentStep approvalStep = step(runId, 4, AgentStepType.APPROVAL_REQUESTED, createTicketTool, true,
+                Map.of(
+                        "approvalId", approval.id(),
+                        "priority", draft.priority().name(),
+                        "titleCharacters", draft.title().length(),
+                        "descriptionCharacters", draft.description().length()));
+        auditRepository.requestApproval(runId, evidence, approval, approvalStep, requestedAt);
+        return get(runId);
+    }
+
+    private RagAnswerResult executeKnowledge(UUID runId, String query, UUID documentId, int sequence) {
+        try {
+            toolPolicy.requireAutoExecutable(knowledgeSearchTool);
+            RagAnswerResult answer = knowledgeSearchTool.execute(new AgentToolInput(query, documentId));
+            append(runId, sequence, AgentStepType.TOOL_CALL, knowledgeSearchTool, true,
+                    Map.of(
+                            "refused", answer.refused(),
+                            "refusalReason", answer.refusalReason() == null ? "" : answer.refusalReason().name(),
+                            "citationCount", answer.citations().size(),
+                            "topEvidenceScore", answer.topEvidenceScore() == null ? -1 : answer.topEvidenceScore()));
+            return answer;
+        } catch (RuntimeException exception) {
+            String code = exception instanceof AgentException agentException
+                    ? agentException.code()
+                    : "AGENT_TOOL_EXECUTION_FAILED";
+            append(runId, sequence, AgentStepType.TOOL_CALL, knowledgeSearchTool, false,
+                    Map.of("errorCode", code));
+            auditRepository.fail(runId, code, "Agent execution failed", clock.instant());
+            throw new AgentException(
+                    "AGENT_RUN_FAILED", "Agent run failed; runId=" + runId, HttpStatus.BAD_GATEWAY);
+        }
+    }
+
+    private boolean isSameCompletedDecision(AgentRunView view, AgentApprovalStatus decision) {
+        return (view.run().status() == AgentRunStatus.COMPLETED
+                && view.approval().status() == AgentApprovalStatus.APPROVED
+                && decision == AgentApprovalStatus.APPROVED)
+                || (view.run().status() == AgentRunStatus.REJECTED
+                && view.approval().status() == AgentApprovalStatus.REJECTED
+                && decision == AgentApprovalStatus.REJECTED);
+    }
+
+    private TicketDraft ticketDraft(String query, RagAnswerResult evidence) {
+        String title = truncate(query.replaceAll("\\s+", " "), MAX_TICKET_TITLE_CHARACTERS);
+        String description = "用户描述：\n" + query + "\n\n知识库建议：\n" + evidence.answer();
+        return new TicketDraft(title, truncate(description, MAX_TICKET_DESCRIPTION_CHARACTERS), TicketPriority.P2);
     }
 
     private void append(
             UUID runId,
             int sequence,
             AgentStepType type,
-            AgentTool tool,
+            AgentTool<?, ?> tool,
             boolean success,
             Map<String, ?> detail) {
-        auditRepository.appendStep(new AgentStep(
+        auditRepository.appendStep(step(runId, sequence, type, tool, success, detail));
+    }
+
+    private AgentStep step(
+            UUID runId,
+            int sequence,
+            AgentStepType type,
+            AgentTool<?, ?> tool,
+            boolean success,
+            Map<String, ?> detail) {
+        return new AgentStep(
                 idSupplier.get(), runId, sequence, type,
                 tool == null ? null : tool.name(), tool == null ? null : tool.risk(),
-                success, json(detail), clock.instant()));
+                success, json(detail), clock.instant());
     }
 
     private String validateQuery(String rawQuery) {
@@ -126,6 +272,24 @@ public class AgentRunService {
                     HttpStatus.BAD_REQUEST);
         }
         return query;
+    }
+
+    private String validateDecisionReason(String rawReason) {
+        if (rawReason == null || rawReason.isBlank()) {
+            return null;
+        }
+        String reason = rawReason.strip();
+        if (reason.length() > MAX_DECISION_REASON_CHARACTERS) {
+            throw new AgentException(
+                    "AGENT_APPROVAL_REASON_TOO_LONG",
+                    "Approval reason must not exceed " + MAX_DECISION_REASON_CHARACTERS + " characters",
+                    HttpStatus.BAD_REQUEST);
+        }
+        return reason;
+    }
+
+    private String truncate(String value, int limit) {
+        return value.length() <= limit ? value : value.substring(0, limit);
     }
 
     private String json(Map<String, ?> detail) {

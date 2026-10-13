@@ -11,6 +11,7 @@ public record AgentRun(
         UUID id,
         String query,
         UUID documentId,
+        AgentTaskType taskType,
         AgentRunStatus status,
         String answer,
         Boolean refused,

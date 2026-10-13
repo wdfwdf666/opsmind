@@ -6,7 +6,7 @@ import com.opsmind.rag.application.RagAnswerService;
 import org.springframework.stereotype.Component;
 
 @Component
-public class KnowledgeSearchAgentTool implements AgentTool {
+public class KnowledgeSearchAgentTool implements AgentTool<AgentToolInput, RagAnswerResult> {
 
     private final RagAnswerService answerService;
 

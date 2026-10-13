@@ -4,16 +4,22 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsmind.agent.domain.AgentAuditRepository;
+import com.opsmind.agent.domain.AgentApproval;
+import com.opsmind.agent.domain.AgentApprovalStatus;
 import com.opsmind.agent.domain.AgentRun;
 import com.opsmind.agent.domain.AgentRunStatus;
+import com.opsmind.agent.domain.AgentTaskType;
 import com.opsmind.agent.domain.AgentStep;
 import com.opsmind.agent.domain.AgentStepType;
 import com.opsmind.agent.domain.AgentToolRisk;
+import com.opsmind.agent.domain.TicketDraft;
+import com.opsmind.agent.domain.TicketPriority;
 import com.opsmind.rag.application.RagAnswerResult;
 import com.opsmind.rag.application.RagCitation;
 import com.opsmind.rag.application.RagRefusalReason;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -40,10 +46,10 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
     public void create(AgentRun run) {
         jdbcTemplate.update("""
                         INSERT INTO agent_run
-                            (id, query_text, document_id, status, citations_json, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                            (id, query_text, document_id, task_type, status, citations_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                run.id(), run.query(), run.documentId(), run.status().name(), "[]",
+                run.id(), run.query(), run.documentId(), run.taskType().name(), run.status().name(), "[]",
                 Timestamp.from(run.createdAt()), Timestamp.from(run.updatedAt()));
     }
 
@@ -73,6 +79,77 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
     }
 
     @Override
+    @Transactional
+    public void requestApproval(
+            UUID runId,
+            RagAnswerResult evidence,
+            AgentApproval approval,
+            AgentStep approvalStep,
+            Instant updatedAt) {
+        jdbcTemplate.update("""
+                        INSERT INTO agent_approval
+                            (id, run_id, tool_name, tool_risk, status, draft_title, draft_description,
+                             draft_priority, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                approval.id(), approval.runId(), approval.toolName(), approval.toolRisk().name(),
+                approval.status().name(), approval.draft().title(), approval.draft().description(),
+                approval.draft().priority().name(), Timestamp.from(approval.createdAt()));
+        int updated = jdbcTemplate.update("""
+                        UPDATE agent_run
+                        SET status = ?, answer_text = ?, refused = ?, refusal_reason = ?, top_evidence_score = ?,
+                            citations_json = ?, updated_at = ?
+                        WHERE id = ? AND status = ?
+                        """,
+                AgentRunStatus.WAITING_APPROVAL.name(), evidence.answer(), evidence.refused(),
+                evidence.refusalReason() == null ? null : evidence.refusalReason().name(), evidence.topEvidenceScore(),
+                citationsJson(evidence.citations()), Timestamp.from(updatedAt), runId, AgentRunStatus.RUNNING.name());
+        if (updated != 1) {
+            throw new IllegalStateException("Agent run is not eligible for approval: " + runId);
+        }
+        appendStep(approvalStep);
+    }
+
+    @Override
+    public boolean decideApproval(
+            UUID runId,
+            AgentApprovalStatus decision,
+            String decisionReason,
+            Instant decidedAt) {
+        return jdbcTemplate.update("""
+                        UPDATE agent_approval
+                        SET status = ?, decision_reason = ?, decided_at = ?
+                        WHERE run_id = ? AND status = ?
+                        """,
+                decision.name(), decisionReason, Timestamp.from(decidedAt), runId,
+                AgentApprovalStatus.PENDING.name()) == 1;
+    }
+
+    @Override
+    public void completeWrite(UUID runId, String answer, Instant completedAt) {
+        jdbcTemplate.update("""
+                        UPDATE agent_run
+                        SET status = ?, answer_text = ?, refused = FALSE, refusal_reason = NULL,
+                            updated_at = ?, completed_at = ?
+                        WHERE id = ? AND status = ?
+                        """,
+                AgentRunStatus.COMPLETED.name(), answer, Timestamp.from(completedAt), Timestamp.from(completedAt),
+                runId, AgentRunStatus.WAITING_APPROVAL.name());
+    }
+
+    @Override
+    public void reject(UUID runId, String answer, Instant completedAt) {
+        jdbcTemplate.update("""
+                        UPDATE agent_run
+                        SET status = ?, answer_text = ?, refused = FALSE, refusal_reason = NULL,
+                            updated_at = ?, completed_at = ?
+                        WHERE id = ? AND status = ?
+                        """,
+                AgentRunStatus.REJECTED.name(), answer, Timestamp.from(completedAt), Timestamp.from(completedAt),
+                runId, AgentRunStatus.WAITING_APPROVAL.name());
+    }
+
+    @Override
     public void fail(UUID runId, String errorCode, String errorMessage, Instant completedAt) {
         jdbcTemplate.update("""
                         UPDATE agent_run
@@ -86,13 +163,24 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
     @Override
     public Optional<AgentRun> findRun(UUID runId) {
         List<AgentRun> runs = jdbcTemplate.query("""
-                        SELECT id, query_text, document_id, status, answer_text, refused, refusal_reason,
+                        SELECT id, query_text, document_id, task_type, status, answer_text, refused, refusal_reason,
                                top_evidence_score, citations_json, error_code, error_message,
                                created_at, updated_at, completed_at
                         FROM agent_run
                         WHERE id = ?
                         """, this::mapRun, runId);
         return runs.stream().findFirst();
+    }
+
+    @Override
+    public Optional<AgentApproval> findApproval(UUID runId) {
+        List<AgentApproval> approvals = jdbcTemplate.query("""
+                        SELECT id, run_id, tool_name, tool_risk, status, draft_title, draft_description,
+                               draft_priority, decision_reason, created_at, decided_at
+                        FROM agent_approval
+                        WHERE run_id = ?
+                        """, this::mapApproval, runId);
+        return approvals.stream().findFirst();
     }
 
     @Override
@@ -113,6 +201,7 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 resultSet.getObject("id", UUID.class),
                 resultSet.getString("query_text"),
                 resultSet.getObject("document_id", UUID.class),
+                AgentTaskType.valueOf(resultSet.getString("task_type")),
                 AgentRunStatus.valueOf(resultSet.getString("status")),
                 resultSet.getString("answer_text"),
                 resultSet.getObject("refused", Boolean.class),
@@ -124,6 +213,23 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 resultSet.getTimestamp("created_at").toInstant(),
                 resultSet.getTimestamp("updated_at").toInstant(),
                 completedAt == null ? null : completedAt.toInstant());
+    }
+
+    private AgentApproval mapApproval(ResultSet resultSet, int rowNumber) throws SQLException {
+        Timestamp decidedAt = resultSet.getTimestamp("decided_at");
+        return new AgentApproval(
+                resultSet.getObject("id", UUID.class),
+                resultSet.getObject("run_id", UUID.class),
+                resultSet.getString("tool_name"),
+                AgentToolRisk.valueOf(resultSet.getString("tool_risk")),
+                AgentApprovalStatus.valueOf(resultSet.getString("status")),
+                new TicketDraft(
+                        resultSet.getString("draft_title"),
+                        resultSet.getString("draft_description"),
+                        TicketPriority.valueOf(resultSet.getString("draft_priority"))),
+                resultSet.getString("decision_reason"),
+                resultSet.getTimestamp("created_at").toInstant(),
+                decidedAt == null ? null : decidedAt.toInstant());
     }
 
     private AgentStep mapStep(ResultSet resultSet, int rowNumber) throws SQLException {

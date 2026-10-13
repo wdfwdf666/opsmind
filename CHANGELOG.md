@@ -2,6 +2,30 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-017] 建立写工具与 Human-in-the-loop 审批闭环
+
+- **日期**：2026-10-13
+- **类型**：功能 / Agent / Human-in-the-loop / 幂等 / 审计
+- **状态**：已完成；H2 自动化回归和 PostgreSQL 17.11 真实接口验证已通过
+- **关联需求或问题**：继续完成项目第 18 步；FEAT-016 只有只读 `knowledge_search`，虽然定义了写风险级别，却没有真实写工具、待审批状态、批准/拒绝接口或幂等副作用，无法证明 Agent 能安全执行有业务影响的操作。
+- **问题**：让 Agent 直接执行创建工单会把模型或路由错误转化为真实副作用；只在内存中等待确认又会在重启后丢失上下文。重复点击批准、网络重试和并发请求还可能创建多张相同工单。
+- **修改内容**：
+  - 将 `AgentTool` 重构为泛型输入/输出契约；保留只读 `knowledge_search`，新增风险为 `WRITE_REQUIRES_APPROVAL` 的 `create_ticket`。
+  - 请求新增显式 `taskType`：`KNOWLEDGE_QA` 保持兼容并默认执行，`CREATE_TICKET` 先检索知识、生成 P2 草稿，然后进入 `WAITING_APPROVAL`，审批前写工具执行次数为 0。
+  - 新增 `POST /api/v1/agent/runs/{runId}/approval`，支持 `APPROVE`/`REJECT` 和可选原因；批准生成 `OPEN` 工单，拒绝以 `REJECTED` 完成且不产生工单。
+  - 新增 Flyway V7：`agent_run.task_type`、`agent_approval`、`support_ticket`；Run、审批、草稿、决定、工单和 1~7 状态步骤均可按 Run ID 回读。
+  - 审批决定、工单写入、步骤追加和 Run 完成处于同一 Spring JDBC 事务；草稿审批记录、`WAITING_APPROVAL` 状态和 `APPROVAL_REQUESTED` 步骤也在一个仓储事务中提交。
+  - `support_ticket.agent_run_id` 使用唯一约束提供最终幂等边界；顺序重复提交相同决定直接返回已有结果，相反决定返回 409。
+  - Swagger 增加知识问答/创建工单双示例、审批接口和响应模型；新增应用层、JDBC、真实 HTTP 与 OpenAPI 测试；新增 VERIFY-003 报告。
+- **实现中发现的问题**：初版先写审批步骤、再写审批记录和 Run 状态，数据库异常时存在半完成审计窗口；随后将三项合并到 `requestApproval` 事务。真实 PostgreSQL 验证还证明 `WAITING_APPROVAL` 时工单数保持 0，说明风险策略不是只显示一个提示，而是真正阻止了写入。
+- **影响文件**：Agent domain/application/infrastructure/API、Flyway V7、Agent/JDBC/HTTP/OpenAPI 测试、`README.md`、`CHANGELOG.md`、VERIFY-003 报告。
+- **验证方式**：执行定向测试、完整 `\.\mvnw.cmd test` 和打包；使用 PostgreSQL 17.11 + pgvector 0.8.7、本地三个 Provider，在临时端口依次执行创建草稿、批准、重复批准、创建第二个草稿和拒绝，并查询 `support_ticket`、`agent_step`。
+- **验证结果**：71 个自动化测试通过，0 失败，0 错误。真实批准 Run 在草稿阶段为 `WAITING_APPROVAL/PENDING`、4 个步骤、0 张工单；批准后为 `COMPLETED/APPROVED`、7 个步骤、1 张工单；重复批准返回同一 Ticket ID，数据库仍为 1 张。拒绝 Run 为 `REJECTED`、5 个步骤、0 张工单。
+- **修改前指标**：1 个只读工具；2 个 Agent API；3 种 Run 状态；没有审批记录、写工具或工单表；65 个测试。
+- **修改后指标**：1 个只读工具 + 1 个写工具；3 个 Agent API；5 种 Run 状态；2 张新增业务/审批表；批准链路 7 步、拒绝链路 5 步；71 个测试。
+- **修改效果**：Agent 从“只能回答问题”升级为“先生成可审查计划，再由人确认并执行有副作用工具”，同时具备持久化等待、拒绝分支、事务一致性、幂等边界和完整审计。
+- **风险与后续**：当前 `taskType` 由调用方显式指定，审批接口还没有登录身份、RBAC、过期租约与多实例并发友好重试；工单系统也是本地模拟表。下一步增加用户/租户身份与审批权限，记录审批人，加入审批过期和 Outbox，再用 Qwen 结构化输出选择受白名单约束的任务类型。
+
 ## [FEAT-016] 建立可审计的只读 Agent 运行闭环
 
 - **日期**：2026-10-13
