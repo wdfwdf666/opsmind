@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalAgentPlannerTests {
 
     private final LocalAgentPlanner planner = new LocalAgentPlanner(
-            new AgentPlannerProperties("local", "local-intent-router-v1", "", "", 256));
+            new AgentPlannerProperties("local", "local-intent-router-v2", "", "", 256));
 
     @Test
     void shouldSelectTicketOnlyForExplicitCreateIntent() {
@@ -24,7 +24,25 @@ class LocalAgentPlannerTests {
 
         assertThat(plan.source()).isEqualTo(AgentTaskTypeSource.PLANNER);
         assertThat(plan.provider()).isEqualTo("local");
-        assertThat(plan.model()).isEqualTo("local-intent-router-v1");
+        assertThat(plan.model()).isEqualTo("local-intent-router-v2");
         assertThat(plan.reason()).isNotBlank();
+    }
+
+    @Test
+    void shouldKeepNegatedWritesAndWorkflowQuestionsReadOnly() {
+        assertThat(planner.plan("不要创建工单，只告诉我连接池告警怎么处理").taskType())
+                .isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(planner.plan("创建工单前需要哪些审批？").taskType())
+                .isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(planner.plan("如何创建工单？").taskType())
+                .isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+    }
+
+    @Test
+    void shouldRecognizeIndirectTicketCreationPhrases() {
+        assertThat(planner.plan("帮我登记一个工单跟进这个问题").taskType())
+                .isEqualTo(AgentTaskType.CREATE_TICKET);
+        assertThat(planner.plan("麻烦开一张工单").taskType())
+                .isEqualTo(AgentTaskType.CREATE_TICKET);
     }
 }

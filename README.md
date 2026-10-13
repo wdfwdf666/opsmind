@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 20 步：Agent Planner 路由评测闭环（FEAT-019 / EVAL-007）**。
+当前完成 **第 21 步：本地降级 Planner 路由质量优化（FEAT-020 / EVAL-008）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -44,9 +44,10 @@
 - 已通过 Flyway V8 持久化任务来源、Planner Provider、模型和理由；API 与审计轨迹可区分 `PLANNER` 和 `EXPLICIT`。
 - 已新增 24 条平衡的 `opsmind-agent-routing-v1` 路由评测集，覆盖知识问答、显式/间接写意图、否定句、流程咨询、歧义请求与 Prompt Injection；评测只调用 Planner，不执行工具或创建工单。
 - 已新增 Agent 路由评测 API，计算 Accuracy、Macro Precision/Recall/F1、分类别指标、危险写误路由率、P50/P95 和逐用例结果。本地规则基线 Accuracy=0.875、Macro-F1=0.8748、危险写误路由率=0.1667，保留 3 条失败用例用于后续回归。
+- 已将本地降级 Planner 升级为 `local-intent-router-v2`：在写意图前优先识别否定表达与流程咨询，并扩充“登记、建立、开一张、建一个”等间接动作短语。同一开发回归集上 Accuracy/Macro-F1 从 0.8750/0.8748 提升到 1.0000，危险写误路由率从 0.1667 降到 0；该结果不作为独立测试集成绩。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：82 个，全部通过。
+- 当前自动化测试：84 个，全部通过。
 
 本地验证：
 
@@ -66,7 +67,7 @@ Copy-Item .env.example .env
 .\mvnw.cmd spring-boot:run
 ```
 
-`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding、Rerank 与 Chat/Planner 的端点协议不同，分别使用 `QWEN_BASE_URL`、`QWEN_RERANK_URL`、`QWEN_CHAT_BASE_URL` 与 `QWEN_PLANNER_BASE_URL`；Chat/Planner 未配置时回退到兼容接口 Base URL。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER`、`GENERATION_PROVIDER`、`AGENT_PLANNER_PROVIDER` 都设为 `local`，并将 `AGENT_PLANNER_MODEL` 设为 `local-intent-router-v1`；本地 Provider 只用于确定性测试和链路演示，不能代表 Qwen 的语义效果。
+`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding、Rerank 与 Chat/Planner 的端点协议不同，分别使用 `QWEN_BASE_URL`、`QWEN_RERANK_URL`、`QWEN_CHAT_BASE_URL` 与 `QWEN_PLANNER_BASE_URL`；Chat/Planner 未配置时回退到兼容接口 Base URL。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER`、`GENERATION_PROVIDER`、`AGENT_PLANNER_PROVIDER` 都设为 `local`，并将 `AGENT_PLANNER_MODEL` 设为 `local-intent-router-v2`；本地 Provider 只用于确定性测试和链路演示，不能代表 Qwen 的语义效果。
 
 数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
 
@@ -150,7 +151,7 @@ RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型�
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩。当前 BM25 基线仍在 JVM 计算分数，不适合大规模生产。路由评测只有 24 条人工样本，local 基线在否定句、流程咨询和间接写意图上有 3 条失败；Qwen 尚未运行该评测，不能声称其路由准确率。Planner 调用也没有超时重试或降级，失败发生在 Run 创建前。审批尚未绑定登录用户、RBAC 或过期时间。下一步划分路由开发集与独立测试集，再优化否定/咨询识别并增加 Planner 降级和失败审计。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。当前 BM25 基线仍在 JVM 计算分数，不适合大规模生产。路由评测只有 24 条人工样本，`local-intent-router-v2` 的 1.0 来自在已知失败集上的规则优化，不是独立测试成绩；Qwen 尚未运行该评测。Planner 调用也没有超时重试或降级，失败发生在 Run 创建前。审批尚未绑定登录用户、RBAC 或过期时间。下一步冻结独立路由测试集验证泛化，再增加 Planner 降级、失败审计和审批身份权限。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

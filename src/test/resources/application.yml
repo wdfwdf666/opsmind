@@ -14,7 +14,7 @@ opsmind:
   agent:
     planner:
       provider: local
-      model: local-intent-router-v1
+      model: local-intent-router-v2
       base-url:
       api-key:
       max-output-tokens: 256
