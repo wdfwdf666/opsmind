@@ -1,0 +1,63 @@
+{
+  "name": "opsmind-answer-v1",
+  "description": "OpsMind 运维手册带引用回答与拒答回归基线",
+  "topK": 3,
+  "cases": [
+    {
+      "id": "alert-diagnosis",
+      "query": "数据库连接池告警应该检查什么？",
+      "answerable": true,
+      "expectedFactGroups": [["活跃连接数"], ["等待线程数"], ["慢查询"]],
+      "expectedHeadingPaths": ["OpsMind 运维手册 > 告警处置"]
+    },
+    {
+      "id": "alert-mitigation",
+      "query": "连接使用率一直超过阈值时先采取什么措施？",
+      "answerable": true,
+      "expectedFactGroups": [["限制异常流量"], ["连接未释放", "连接泄漏"]],
+      "expectedHeadingPaths": ["OpsMind 运维手册 > 告警处置"]
+    },
+    {
+      "id": "recovery-observation",
+      "query": "流量恢复后需要持续观察哪些指标？",
+      "answerable": true,
+      "expectedFactGroups": [["错误率"], ["连接池指标"], ["连续多个采样周期"]],
+      "expectedHeadingPaths": ["OpsMind 运维手册 > 告警处置 > 恢复验证"]
+    },
+    {
+      "id": "recovery-regression",
+      "query": "恢复后指标再次恶化应该怎么办？",
+      "answerable": true,
+      "expectedFactGroups": [["回滚最近变更"], ["升级事件等级"]],
+      "expectedHeadingPaths": ["OpsMind 运维手册 > 告警处置 > 恢复验证"]
+    },
+    {
+      "id": "release-rollback",
+      "query": "应用发布出现问题时如何执行回滚？",
+      "answerable": true,
+      "expectedFactGroups": [["恢复应用版本"], ["迁移兼容性"], ["数据库回退"]],
+      "expectedHeadingPaths": ["OpsMind 运维手册 > 发布回滚"]
+    },
+    {
+      "id": "rollback-verification",
+      "query": "回滚完成后如何确认核心功能正常？",
+      "answerable": true,
+      "expectedFactGroups": [["核心接口执行冒烟测试", "核心接口冒烟测试"], ["记录最终结果"]],
+      "expectedHeadingPaths": ["OpsMind 运维手册 > 发布回滚"]
+    },
+    {
+      "id": "unanswerable-certificate",
+      "query": "Kubernetes 集群证书到期后如何轮换？",
+      "answerable": false,
+      "expectedFactGroups": [],
+      "expectedHeadingPaths": []
+    },
+    {
+      "id": "unanswerable-expense",
+      "query": "员工出差报销的住宿标准是多少？",
+      "answerable": false,
+      "expectedFactGroups": [],
+      "expectedHeadingPaths": []
+    }
+  ]
+}
