@@ -92,6 +92,7 @@ public class AnswerEvaluationService {
 
         return new AnswerEvaluationCaseResult(
                 evaluationCase.id(), evaluationCase.query(), evaluationCase.answerable(), answer.refused(),
+                answer.refusalReason(), answer.topEvidenceScore(),
                 correctness, faithfulness, expectedFacts, matchedFacts,
                 List.copyOf(evaluationCase.expectedHeadingPaths()), citedHeadings,
                 citationPrecision, citationRecall, latencyMs,

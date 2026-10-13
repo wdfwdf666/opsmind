@@ -16,10 +16,11 @@ import java.util.Map;
 @Component
 public class AnswerEvaluationDatasetLoader {
 
-    public static final String DEFAULT_DATASET = "opsmind-answer-v1";
+    public static final String DEFAULT_DATASET = "opsmind-answer-v2";
 
     private static final Map<String, String> DATASETS = Map.of(
-            DEFAULT_DATASET, "evaluation/opsmind-answer-v1.json");
+            "opsmind-answer-v1", "evaluation/opsmind-answer-v1.json",
+            DEFAULT_DATASET, "evaluation/opsmind-answer-v2.json");
 
     private final ObjectMapper objectMapper;
 

@@ -9,6 +9,7 @@ public record GenerationProperties(
         String baseUrl,
         String apiKey,
         int evidenceTopK,
+        double minimumEvidenceScore,
         int maxContextCharacters,
         int maxOutputTokens,
         double temperature) {
@@ -22,6 +23,9 @@ public record GenerationProperties(
         }
         if (evidenceTopK < 1 || evidenceTopK > 50) {
             throw new IllegalArgumentException("Generation evidence top-k must be between 1 and 50");
+        }
+        if (!Double.isFinite(minimumEvidenceScore) || minimumEvidenceScore < 0 || minimumEvidenceScore > 1) {
+            throw new IllegalArgumentException("Generation minimum evidence score must be between 0 and 1");
         }
         if (maxContextCharacters < 1000 || maxOutputTokens < 1) {
             throw new IllegalArgumentException("Generation context and output budgets are invalid");

@@ -15,12 +15,15 @@ class AnswerEvaluationDatasetLoaderTests {
     @Test
     void shouldLoadVersionedAnswerDataset() {
         var dataset = loader.load(null);
+        var historicalDataset = loader.load("opsmind-answer-v1");
 
-        assertThat(dataset.name()).isEqualTo("opsmind-answer-v1");
+        assertThat(dataset.name()).isEqualTo("opsmind-answer-v2");
         assertThat(dataset.topK()).isEqualTo(3);
-        assertThat(dataset.cases()).hasSize(8);
+        assertThat(dataset.cases()).hasSize(20);
         assertThat(dataset.cases()).filteredOn(evaluationCase -> evaluationCase.answerable()).hasSize(6);
         assertThat(dataset.cases()).extracting(evaluationCase -> evaluationCase.id()).doesNotHaveDuplicates();
+        assertThat(historicalDataset.name()).isEqualTo("opsmind-answer-v1");
+        assertThat(historicalDataset.cases()).hasSize(8);
     }
 
     @Test

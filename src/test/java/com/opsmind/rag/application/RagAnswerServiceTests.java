@@ -55,8 +55,32 @@ class RagAnswerServiceTests {
         RagAnswerResult result = service.answer("unknown", null, null);
 
         assertThat(result.refused()).isTrue();
+        assertThat(result.refusalReason()).isEqualTo(RagRefusalReason.NO_EVIDENCE);
+        assertThat(result.topEvidenceScore()).isNull();
         assertThat(result.citations()).isEmpty();
         assertThat(result.answer()).contains("未检索到");
+        verify(provider, never()).generate(org.mockito.ArgumentMatchers.anyString(), anyList());
+    }
+
+    @Test
+    void shouldRefuseLowRelevanceEvidenceWithoutCallingGenerator() {
+        UUID documentId = UUID.randomUUID();
+        RerankedSearchService search = mock(RerankedSearchService.class);
+        AnswerGenerationProvider provider = mock(AnswerGenerationProvider.class);
+        when(provider.model()).thenReturn("generation-model");
+        SemanticSearchHit weakHit = new SemanticSearchHit(
+                UUID.randomUUID(), UUID.randomUUID(), documentId, "runbook.md", "无关章节",
+                "无关片段", "无关上下文", 0.149);
+        when(search.search("域外问题", 5, documentId)).thenReturn(new SemanticSearchResult(
+                "域外问题", "retrieval-model", documentId, 1, List.of(weakHit)));
+        RagAnswerService service = new RagAnswerService(search, provider, properties());
+
+        RagAnswerResult result = service.answer("域外问题", null, documentId);
+
+        assertThat(result.refused()).isTrue();
+        assertThat(result.refusalReason()).isEqualTo(RagRefusalReason.LOW_RELEVANCE);
+        assertThat(result.topEvidenceScore()).isEqualTo(0.149);
+        assertThat(result.answer()).contains("相关性不足");
         verify(provider, never()).generate(org.mockito.ArgumentMatchers.anyString(), anyList());
     }
 
@@ -79,7 +103,7 @@ class RagAnswerServiceTests {
     }
 
     private GenerationProperties properties() {
-        return new GenerationProperties("local", "generation-model", "", "", 5, 12000, 1200, 0.1);
+        return new GenerationProperties("local", "generation-model", "", "", 5, 0.15, 12000, 1200, 0.1);
     }
 
     private SemanticSearchHit hit(UUID documentId, UUID parentId, String heading, String child) {

@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 15 步：带引用回答质量与拒答评测（FEAT-014 / EVAL-005）**。
+当前完成 **第 16 步：证据充足性门禁与低相关度拒答（FEAT-015 / EVAL-006）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -29,11 +29,12 @@
 - 已接入 `qwen3.7-text-rerank` 精排：混合检索先扩大候选池，再由 Query-Passage 相关性模型返回最终 Top-K；支持独立接口、错误脱敏、配置校验及 VECTOR/HYBRID/RERANKED 三策略评测。
 - 已接入 `qwen3.7-plus` Chat Completions：精排命中按 Parent 去重并在字符预算内组装证据，回答必须使用 `[S1]` 形式引用，API 只返回实际引用的来源；无任何证据时不调用模型并确定性拒答。
 - 生成提示把检索文本作为不可信 JSON 数据隔离，禁止执行文档内指令或使用模型记忆补造内部事实；Qwen 空响应、未知引用及无引用回答都会被拒绝并映射为脱敏的 502。
-- 已提供版本化回答评测集与 API，覆盖 6 个可回答问题和 2 个不可回答问题，计算事实覆盖率、引用 Precision/Recall、拒答 Precision/Recall/F1、延迟、Token 用量和逐用例结果。
+- 已提供版本化回答评测集与 API；v1 保留 6 个可回答和 2 个不可回答问题作为历史基线，v2 扩展到 6 个可回答和 14 个跨领域/相邻领域负样本，计算事实覆盖率、引用 Precision/Recall、拒答 Precision/Recall/F1、延迟、Token 用量和逐用例结果。
 - `faithfulnessProxy` 使用回答与所引原文的字符 bigram 覆盖率提供确定性回归信号，字段名明确标注为 Proxy，不把词面重合冒充语义忠实度；EVAL-005 已暴露当前拒答 F1 为 0 的真实缺陷。
+- 已新增生成前证据充足性门禁：Top-1 精排分数低于 `MINIMUM_EVIDENCE_SCORE` 时不调用 Chat 模型，返回 `LOW_RELEVANCE`、实际 `topEvidenceScore` 和确定性拒答；本地初始阈值 0.15 使 v2 拒答 F1 从 0 提升到 1.0。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：59 个，全部通过。
+- 当前自动化测试：60 个，全部通过。
 
 本地验证：
 
@@ -100,11 +101,13 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 
 RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型名和供应商 Token 用量。回答中的 `[S1]` 与 `citations[].sourceId` 对应，引用对象包含文档、Parent/Child Chunk、标题路径、片段和精排分数。评测接口可通过 `strategy` 选择 `VECTOR`、`HYBRID` 或 `RERANKED`；未提供时保持兼容，默认使用 `VECTOR`。`/search`、`/search/hybrid` 和 `/search/reranked` 主要用于检索调试、降级和对照，面向最终问答时使用 `/rag/answer`。
 
-回答评测默认加载白名单数据集 `opsmind-answer-v1`，可通过 `documentId` 固定评测范围，并可选覆盖 `topK`。若生产配置使用 Qwen，8 条用例都会产生远程 Embedding、Rerank 和 Chat 调用；本地回归应显式切换三个 Provider 为 `local`。
+回答评测默认加载白名单数据集 `opsmind-answer-v2`，也可显式选择历史 `opsmind-answer-v1`；可通过 `documentId` 固定评测范围，并可选覆盖 `topK`。若生产配置使用 Qwen，未被门禁拒绝的用例会产生远程 Chat 调用，所有用例仍会产生远程 Embedding 与 Rerank 调用；本地回归应显式切换三个 Provider 为 `local`。
+
+`MINIMUM_EVIDENCE_SCORE` 默认是 0.15。回答响应会返回 `topEvidenceScore`，拒答时还返回 `refusalReason=NO_EVIDENCE` 或 `LOW_RELEVANCE`。该分数由当前 Reranker 定义，不同模型、语料、分块和 Query 分布不能共用同一阈值；切换 Qwen Reranker 或扩充知识库后必须重新运行正负样本评测再配置。
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索评测集只有 1 篇文档、3 个 Child Chunk 和 6 个查询，回答评测集也只有 6 个可回答与 2 个不可回答用例，只能作为回归框架，不能代表生产准确率。Hybrid 已在该集合达到 Top-1 100%，所以当前数据无法证明 Reranker 的质量增益；P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。EVAL-005 证明当前“只在零证据时拒答”会让两个域外问题都被错误回答，拒答 F1 为 0；下一步将扩充困难负样本并校准可解释的相关度/证据充足性策略，再开始实现可审计的 Agent 工具调用。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未获得数据外发授权验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。下一步应扩充多文档数据并划分校准集/独立测试集，然后开始实现可审计的 Agent 工具调用。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

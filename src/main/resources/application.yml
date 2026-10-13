@@ -59,6 +59,7 @@ opsmind:
     base-url: ${QWEN_CHAT_BASE_URL:${QWEN_BASE_URL:}}
     api-key: ${DASHSCOPE_API_KEY:}
     evidence-top-k: 5
+    minimum-evidence-score: ${MINIMUM_EVIDENCE_SCORE:0.15}
     max-context-characters: 12000
     max-output-tokens: 1200
     temperature: 0.1

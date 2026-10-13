@@ -86,7 +86,7 @@ class QwenChatAnswerGenerationProviderTests {
     }
 
     private GenerationProperties properties(String baseUrl, String apiKey) {
-        return new GenerationProperties("qwen", "qwen3.7-plus", baseUrl, apiKey, 5, 12000, 1200, 0.1);
+        return new GenerationProperties("qwen", "qwen3.7-plus", baseUrl, apiKey, 5, 0.15, 12000, 1200, 0.1);
     }
 
     private RagEvidence evidence() {

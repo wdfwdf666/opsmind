@@ -9,6 +9,8 @@ public record RagAnswerResult(
         String retrievalModel,
         String generationModel,
         boolean refused,
+        RagRefusalReason refusalReason,
+        Double topEvidenceScore,
         String answer,
         List<RagCitation> citations,
         Integer promptTokens,

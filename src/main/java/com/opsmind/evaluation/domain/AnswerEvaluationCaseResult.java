@@ -1,5 +1,7 @@
 package com.opsmind.evaluation.domain;
 
+import com.opsmind.rag.application.RagRefusalReason;
+
 import java.util.List;
 
 public record AnswerEvaluationCaseResult(
@@ -7,6 +9,8 @@ public record AnswerEvaluationCaseResult(
         String query,
         boolean answerable,
         boolean refused,
+        RagRefusalReason refusalReason,
+        Double topEvidenceScore,
         Double answerCorrectness,
         Double faithfulnessProxy,
         List<String> expectedFacts,

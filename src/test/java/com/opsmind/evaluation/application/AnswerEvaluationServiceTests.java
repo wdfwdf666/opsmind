@@ -6,6 +6,7 @@ import com.opsmind.evaluation.domain.EvaluationException;
 import com.opsmind.rag.application.RagAnswerResult;
 import com.opsmind.rag.application.RagAnswerService;
 import com.opsmind.rag.application.RagCitation;
+import com.opsmind.rag.application.RagRefusalReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -37,13 +38,14 @@ class AnswerEvaluationServiceTests {
                         "unanswerable", "未知制度", false, List.of(), List.of()))));
         when(answerService.answer("检查什么", 3, DOCUMENT_ID)).thenReturn(new RagAnswerResult(
                 "检查什么", DOCUMENT_ID, "retrieval", "generation", false,
-                "检查活跃连接数和慢查询 [S1]",
+                null, 0.9, "检查活跃连接数和慢查询 [S1]",
                 List.of(new RagCitation(
                         "S1", CHUNK_ID, null, DOCUMENT_ID, "manual.md", "告警处置",
                         "检查活跃连接数和慢查询", 0.9)),
                 10, 4, 14));
         when(answerService.answer("未知制度", 3, DOCUMENT_ID)).thenReturn(new RagAnswerResult(
                 "未知制度", DOCUMENT_ID, "retrieval", "generation", true,
+                RagRefusalReason.NO_EVIDENCE, null,
                 "未检索到可用的内部知识证据，暂时无法回答该问题。", List.of(), 0, 0, 0));
         long[] times = {0, 2_000_000, 10_000_000, 14_000_000};
         AtomicInteger timeIndex = new AtomicInteger();
@@ -72,7 +74,8 @@ class AnswerEvaluationServiceTests {
                 "answer-v1", "test", 3,
                 List.of(new AnswerEvaluationCase("unknown", "未知制度", false, List.of(), List.of()))));
         when(answerService.answer("未知制度", 2, null)).thenReturn(new RagAnswerResult(
-                "未知制度", null, "retrieval", "generation", false, "错误回答 [S1]",
+                "未知制度", null, "retrieval", "generation", false,
+                null, 0.1, "错误回答 [S1]",
                 List.of(new RagCitation(
                         "S1", CHUNK_ID, null, DOCUMENT_ID, "manual.md", "无关章节", "无关内容", 0.1)),
                 1, 1, 2));

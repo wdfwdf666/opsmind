@@ -24,6 +24,7 @@ public class RagAnswerService {
     private static final Pattern CITATION_PATTERN = Pattern.compile("\\[S(\\d+)]");
     private static final int EXCERPT_CHARACTERS = 240;
     private static final String NO_EVIDENCE_ANSWER = "未检索到可用的内部知识证据，暂时无法回答该问题。";
+    private static final String LOW_RELEVANCE_ANSWER = "检索到的内部知识与问题相关性不足，暂时无法可靠回答。";
 
     private final RerankedSearchService searchService;
     private final AnswerGenerationProvider generationProvider;
@@ -41,11 +42,18 @@ public class RagAnswerService {
     public RagAnswerResult answer(String query, Integer requestedTopK, UUID documentId) {
         int topK = requestedTopK == null ? properties.evidenceTopK() : requestedTopK;
         SemanticSearchResult searchResult = searchService.search(query, topK, documentId);
+        Double topEvidenceScore = searchResult.hits().isEmpty() ? null : searchResult.hits().getFirst().score();
+        if (topEvidenceScore == null) {
+            return refusal(searchResult, documentId, RagRefusalReason.NO_EVIDENCE, null, NO_EVIDENCE_ANSWER);
+        }
+        if (topEvidenceScore < properties.minimumEvidenceScore()) {
+            return refusal(
+                    searchResult, documentId, RagRefusalReason.LOW_RELEVANCE,
+                    topEvidenceScore, LOW_RELEVANCE_ANSWER);
+        }
         List<RagEvidence> evidence = assembleEvidence(searchResult.hits());
         if (evidence.isEmpty()) {
-            return new RagAnswerResult(
-                    searchResult.query(), documentId, searchResult.model(), generationProvider.model(), true,
-                    NO_EVIDENCE_ANSWER, List.of(), 0, 0, 0);
+            return refusal(searchResult, documentId, RagRefusalReason.NO_EVIDENCE, topEvidenceScore, NO_EVIDENCE_ANSWER);
         }
 
         GeneratedAnswer generated = generationProvider.generate(searchResult.query(), evidence);
@@ -53,7 +61,19 @@ public class RagAnswerService {
         List<RagCitation> citations = referencedCitations(answer, evidence);
         return new RagAnswerResult(
                 searchResult.query(), documentId, searchResult.model(), generationProvider.model(), false,
-                answer, citations, generated.promptTokens(), generated.completionTokens(), generated.totalTokens());
+                null, topEvidenceScore, answer, citations,
+                generated.promptTokens(), generated.completionTokens(), generated.totalTokens());
+    }
+
+    private RagAnswerResult refusal(
+            SemanticSearchResult searchResult,
+            UUID documentId,
+            RagRefusalReason reason,
+            Double topEvidenceScore,
+            String answer) {
+        return new RagAnswerResult(
+                searchResult.query(), documentId, searchResult.model(), generationProvider.model(), true,
+                reason, topEvidenceScore, answer, List.of(), 0, 0, 0);
     }
 
     private List<RagEvidence> assembleEvidence(List<SemanticSearchHit> hits) {
