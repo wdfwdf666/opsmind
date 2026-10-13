@@ -21,6 +21,10 @@ opsmind:
       connect-timeout-ms: 2000
       read-timeout-ms: 5000
       max-attempts: 2
+      retry-initial-backoff-ms: 0
+      retry-max-backoff-ms: 0
+      circuit-failure-threshold: 5
+      circuit-open-duration-ms: 30000
       fallback-enabled: true
       fallback-model: local-intent-router-v2
   document:

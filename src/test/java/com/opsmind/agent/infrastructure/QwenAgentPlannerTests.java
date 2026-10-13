@@ -5,11 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsmind.agent.config.AgentPlannerProperties;
 import com.opsmind.agent.domain.AgentException;
 import com.opsmind.agent.domain.AgentTaskType;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -144,6 +149,104 @@ class QwenAgentPlannerTests {
         server.verify();
     }
 
+    @Test
+    void shouldApplyExponentialBackoffAndPublishLowCardinalityMetrics() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        List<Long> delays = new ArrayList<>();
+        AgentPlannerProperties properties = properties(3, true, 25, 100, 5);
+        QwenAgentPlanner planner = new QwenAgentPlanner(
+                properties,
+                builder,
+                new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES),
+                registry,
+                new QwenPlannerCircuitBreaker(5, 30000, Clock.systemUTC()),
+                delays::add);
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withSuccess("""
+                        {"choices":[{"message":{"role":"assistant","content":"{\\"taskType\\":\\"KNOWLEDGE_QA\\",\\"reason\\":\\"知识咨询\\"}"}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var plan = planner.plan("数据库告警怎么处理？");
+
+        assertThat(plan.provider()).isEqualTo("qwen");
+        assertThat(delays).containsExactly(25L, 50L);
+        assertThat(registry.get("opsmind.agent.planner.retries").tag("reason", "server-error")
+                .counter().count()).isEqualTo(2);
+        assertThat(registry.get("opsmind.agent.planner.requests").tag("outcome", "qwen")
+                .counter().count()).isEqualTo(1);
+        assertThat(registry.get("opsmind.agent.planner.duration").tag("outcome", "qwen")
+                .timer().count()).isEqualTo(1);
+        server.verify();
+    }
+
+    @Test
+    void shouldOpenCircuitAndBypassRemotePlanner() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentPlannerProperties properties = properties(1, true, 0, 0, 2);
+        QwenPlannerCircuitBreaker circuitBreaker = new QwenPlannerCircuitBreaker(2, 30000, Clock.systemUTC());
+        QwenAgentPlanner planner = new QwenAgentPlanner(
+                properties,
+                builder,
+                new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES),
+                registry,
+                circuitBreaker,
+                ignored -> {
+                });
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+
+        planner.plan("第一次请求");
+        planner.plan("第二次请求");
+        var bypassed = planner.plan("第三次请求");
+
+        assertThat(bypassed.provider()).isEqualTo("local-fallback");
+        assertThat(bypassed.reason()).contains("AGENT_PLANNER_CIRCUIT_OPEN", "attempts=0");
+        assertThat(circuitBreaker.state()).isEqualTo(QwenPlannerCircuitBreaker.State.OPEN);
+        assertThat(registry.get("opsmind.agent.planner.circuit.rejected").counter().count()).isEqualTo(1);
+        assertThat(registry.get("opsmind.agent.planner.circuit.opened").counter().count()).isEqualTo(1);
+        assertThat(registry.get("opsmind.agent.planner.circuit.state").gauge().value()).isEqualTo(1);
+        server.verify();
+    }
+
+    @Test
+    void shouldStopPlanningWhenBackoffIsInterrupted() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentPlannerProperties properties = properties(2, true, 25, 100, 5);
+        QwenAgentPlanner planner = new QwenAgentPlanner(
+                properties,
+                builder,
+                new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES),
+                new SimpleMeterRegistry(),
+                new QwenPlannerCircuitBreaker(5, 30000, Clock.systemUTC()),
+                ignored -> {
+                    throw new InterruptedException("shutdown");
+                });
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+
+        try {
+            assertThatThrownBy(() -> planner.plan("数据库告警怎么处理？"))
+                    .isInstanceOf(AgentException.class)
+                    .satisfies(exception -> assertThat(((AgentException) exception).code())
+                            .isEqualTo("AGENT_PLANNER_RETRY_INTERRUPTED"));
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+        server.verify();
+    }
+
     private QwenAgentPlanner planner(String baseUrl, String apiKey, RestClient.Builder builder) {
         return planner(baseUrl, apiKey, builder, 1, false);
     }
@@ -152,9 +255,24 @@ class QwenAgentPlannerTests {
             String baseUrl, String apiKey, RestClient.Builder builder, int maxAttempts, boolean fallbackEnabled) {
         ObjectMapper mapper = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         return new QwenAgentPlanner(
-                new AgentPlannerProperties(
-                        "qwen", "qwen3.7-plus", baseUrl, apiKey, 256,
-                        2000, 5000, maxAttempts, fallbackEnabled, "local-intent-router-v2"),
+                properties(baseUrl, apiKey, maxAttempts, fallbackEnabled, 0, 0, 5),
                 builder, mapper);
+    }
+
+    private AgentPlannerProperties properties(
+            int maxAttempts, boolean fallbackEnabled, int initialBackoffMs, int maxBackoffMs,
+            int failureThreshold) {
+        return properties(
+                "https://workspace.example/v1", "secret", maxAttempts, fallbackEnabled,
+                initialBackoffMs, maxBackoffMs, failureThreshold);
+    }
+
+    private AgentPlannerProperties properties(
+            String baseUrl, String apiKey, int maxAttempts, boolean fallbackEnabled,
+            int initialBackoffMs, int maxBackoffMs, int failureThreshold) {
+        return new AgentPlannerProperties(
+                "qwen", "qwen3.7-plus", baseUrl, apiKey, 256,
+                2000, 5000, maxAttempts, initialBackoffMs, maxBackoffMs,
+                failureThreshold, 30000, fallbackEnabled, "local-intent-router-v2");
     }
 }

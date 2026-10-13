@@ -12,6 +12,10 @@ public record AgentPlannerProperties(
         int connectTimeoutMs,
         int readTimeoutMs,
         int maxAttempts,
+        int retryInitialBackoffMs,
+        int retryMaxBackoffMs,
+        int circuitFailureThreshold,
+        int circuitOpenDurationMs,
         boolean fallbackEnabled,
         String fallbackModel) {
 
@@ -31,6 +35,14 @@ public record AgentPlannerProperties(
         }
         if (maxAttempts < 1 || maxAttempts > 3) {
             throw new IllegalArgumentException("Agent planner max attempts must be between 1 and 3");
+        }
+        if (retryInitialBackoffMs < 0 || retryInitialBackoffMs > 10000
+                || retryMaxBackoffMs < retryInitialBackoffMs || retryMaxBackoffMs > 60000) {
+            throw new IllegalArgumentException("Agent planner retry backoff is invalid");
+        }
+        if (circuitFailureThreshold < 1 || circuitFailureThreshold > 100
+                || circuitOpenDurationMs < 100 || circuitOpenDurationMs > 600000) {
+            throw new IllegalArgumentException("Agent planner circuit breaker configuration is invalid");
         }
         if (fallbackEnabled && (fallbackModel == null || fallbackModel.isBlank())) {
             throw new IllegalArgumentException("Agent planner fallback model must not be blank");

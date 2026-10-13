@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 22 步：Qwen Planner 超时、重试与本地降级（FEAT-021 / VERIFY-005）**。
+当前完成 **第 23 步：Planner 指数退避、熔断与可观测指标（FEAT-022 / VERIFY-006）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -47,9 +47,11 @@
 - 已将本地降级 Planner 升级为 `local-intent-router-v2`：在写意图前优先识别否定表达与流程咨询，并扩充“登记、建立、开一张、建一个”等间接动作短语。同一开发回归集上 Accuracy/Macro-F1 从 0.8750/0.8748 提升到 1.0000，危险写误路由率从 0.1667 降到 0；该结果不作为独立测试集成绩。
 - Qwen Planner 已配置独立连接/读取超时；网络错误、HTTP 429 和 5xx 最多按配置重试，普通 4xx 不重复请求。默认两次远程尝试仍失败时，自动降级到 `local-intent-router-v2`。
 - 降级结果以 `plannerProvider=local-fallback` 持久化，并在 `plannerReason` 中记录脱敏错误码和尝试次数；Planner 仍只决定受限任务类型，写工具审批边界不变。缺少 API Key/Base URL 等部署配置时直接暴露配置错误，避免错误配置被静默掩盖。
+- Planner 重试已改为可配置指数退避；实例内线程安全熔断器支持 `CLOSED/OPEN/HALF_OPEN`，连续失败达到阈值后直接走本地降级，开放窗口结束只放行一个探测请求，成功后自动关闭。
+- 已通过 Micrometer 发布 Planner 请求结果、端到端耗时、远程尝试、重试原因、降级原因、熔断打开/拒绝次数和状态 Gauge；所有标签均为固定枚举或内部错误码，不记录用户问题与上游响应正文。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：87 个，全部通过。
+- 当前自动化测试：91 个，全部通过。
 
 本地验证：
 
@@ -71,7 +73,9 @@ Copy-Item .env.example .env
 
 `.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding、Rerank 与 Chat/Planner 的端点协议不同，分别使用 `QWEN_BASE_URL`、`QWEN_RERANK_URL`、`QWEN_CHAT_BASE_URL` 与 `QWEN_PLANNER_BASE_URL`；Chat/Planner 未配置时回退到兼容接口 Base URL。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER`、`GENERATION_PROVIDER`、`AGENT_PLANNER_PROVIDER` 都设为 `local`，并将 `AGENT_PLANNER_MODEL` 设为 `local-intent-router-v2`；本地 Provider 只用于确定性测试和链路演示，不能代表 Qwen 的语义效果。
 
-Planner 韧性参数也从 `.env` 注入：`QWEN_PLANNER_CONNECT_TIMEOUT_MS`、`QWEN_PLANNER_READ_TIMEOUT_MS`、`QWEN_PLANNER_MAX_ATTEMPTS`、`QWEN_PLANNER_FALLBACK_ENABLED` 和 `AGENT_PLANNER_FALLBACK_MODEL`。默认值分别为 2000 ms、5000 ms、2 次、启用、`local-intent-router-v2`。远程请求成功时审计 Provider 仍为 `qwen`；发生降级时为 `local-fallback`。
+Planner 韧性参数也从 `.env` 注入：`QWEN_PLANNER_CONNECT_TIMEOUT_MS`、`QWEN_PLANNER_READ_TIMEOUT_MS`、`QWEN_PLANNER_MAX_ATTEMPTS`、`QWEN_PLANNER_RETRY_INITIAL_BACKOFF_MS`、`QWEN_PLANNER_RETRY_MAX_BACKOFF_MS`、`QWEN_PLANNER_CIRCUIT_FAILURE_THRESHOLD`、`QWEN_PLANNER_CIRCUIT_OPEN_DURATION_MS`、`QWEN_PLANNER_FALLBACK_ENABLED` 和 `AGENT_PLANNER_FALLBACK_MODEL`。默认超时为 2000/5000 ms，最多尝试 2 次，退避从 200 ms 开始并封顶 1000 ms；连续 5 个最终失败后熔断 30 秒。远程请求成功时审计 Provider 仍为 `qwen`；发生降级时为 `local-fallback`。
+
+Planner 指标可通过 `GET /actuator/metrics` 查询，常用名称为 `opsmind.agent.planner.requests`、`duration`、`attempts`、`retries`、`fallbacks`、`circuit.opened`、`circuit.rejected` 和 `circuit.state`。状态 Gauge 使用 `0=CLOSED`、`0.5=HALF_OPEN`、`1=OPEN`。
 
 数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
 
@@ -155,7 +159,7 @@ RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型�
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。当前 BM25 基线仍在 JVM 计算分数，不适合大规模生产。路由评测只有 24 条人工样本，`local-intent-router-v2` 的 1.0 来自在已知失败集上的规则优化，不是独立测试成绩；Qwen 尚未运行该评测。Planner 当前采用固定次数立即重试，尚未加入指数退避、抖动、熔断和跨实例失败指标；若禁用降级或本地 Planner 也失败，异常仍发生在 Run 创建前。审批尚未绑定登录用户、RBAC 或过期时间。下一步冻结独立路由测试集验证泛化，再增加 Planner 指标/熔断、失败审计和审批身份权限。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。当前 BM25 基线仍在 JVM 计算分数，不适合大规模生产。路由评测只有 24 条人工样本，`local-intent-router-v2` 的 1.0 来自在已知失败集上的规则优化，不是独立测试成绩；Qwen 尚未运行该评测。Planner 熔断状态保存在单个应用实例内，尚未加入随机抖动、跨实例共享状态、告警规则和 Prometheus/Grafana 仪表盘；若禁用降级或本地 Planner 也失败，异常仍发生在 Run 创建前。审批尚未绑定登录用户、RBAC 或过期时间。下一步冻结独立路由测试集验证泛化，再增加监控告警、失败审计和审批身份权限。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

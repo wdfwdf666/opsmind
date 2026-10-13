@@ -33,6 +33,10 @@ opsmind:
       connect-timeout-ms: ${QWEN_PLANNER_CONNECT_TIMEOUT_MS:2000}
       read-timeout-ms: ${QWEN_PLANNER_READ_TIMEOUT_MS:5000}
       max-attempts: ${QWEN_PLANNER_MAX_ATTEMPTS:2}
+      retry-initial-backoff-ms: ${QWEN_PLANNER_RETRY_INITIAL_BACKOFF_MS:200}
+      retry-max-backoff-ms: ${QWEN_PLANNER_RETRY_MAX_BACKOFF_MS:1000}
+      circuit-failure-threshold: ${QWEN_PLANNER_CIRCUIT_FAILURE_THRESHOLD:5}
+      circuit-open-duration-ms: ${QWEN_PLANNER_CIRCUIT_OPEN_DURATION_MS:30000}
       fallback-enabled: ${QWEN_PLANNER_FALLBACK_ENABLED:true}
       fallback-model: ${AGENT_PLANNER_FALLBACK_MODEL:local-intent-router-v2}
   document:

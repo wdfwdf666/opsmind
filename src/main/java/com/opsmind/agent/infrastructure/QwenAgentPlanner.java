@@ -11,6 +11,10 @@ import com.opsmind.agent.config.AgentPlannerProperties;
 import com.opsmind.agent.domain.AgentException;
 import com.opsmind.agent.domain.AgentTaskType;
 import com.opsmind.agent.domain.AgentTaskTypeSource;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
@@ -22,6 +26,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.net.http.HttpClient;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -42,28 +47,84 @@ public class QwenAgentPlanner implements AgentPlanner {
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final LocalAgentPlanner fallbackPlanner;
+    private final MeterRegistry meterRegistry;
+    private final QwenPlannerCircuitBreaker circuitBreaker;
+    private final RetrySleeper retrySleeper;
 
     @Autowired
-    public QwenAgentPlanner(AgentPlannerProperties properties) {
-        this(properties, productionRestClient(properties), strictObjectMapper());
+    public QwenAgentPlanner(AgentPlannerProperties properties, MeterRegistry meterRegistry) {
+        this(
+                properties,
+                productionRestClient(properties),
+                strictObjectMapper(),
+                meterRegistry,
+                new QwenPlannerCircuitBreaker(
+                        properties.circuitFailureThreshold(), properties.circuitOpenDurationMs(), Clock.systemUTC()),
+                Thread::sleep);
     }
 
     QwenAgentPlanner(
             AgentPlannerProperties properties, RestClient.Builder restClientBuilder, ObjectMapper objectMapper) {
+        this(
+                properties,
+                restClientBuilder,
+                objectMapper,
+                new SimpleMeterRegistry(),
+                new QwenPlannerCircuitBreaker(
+                        properties.circuitFailureThreshold(), properties.circuitOpenDurationMs(), Clock.systemUTC()),
+                ignored -> {
+                });
+    }
+
+    QwenAgentPlanner(
+            AgentPlannerProperties properties,
+            RestClient.Builder restClientBuilder,
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry,
+            QwenPlannerCircuitBreaker circuitBreaker,
+            RetrySleeper retrySleeper) {
         this.properties = properties;
         this.restClient = restClientBuilder.build();
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
+        this.circuitBreaker = circuitBreaker;
+        this.retrySleeper = retrySleeper;
         this.fallbackPlanner = properties.fallbackEnabled()
                 ? new LocalAgentPlanner(new AgentPlannerProperties(
                         "local", properties.fallbackModel(), "", "", properties.maxOutputTokens(),
-                        properties.connectTimeoutMs(), properties.readTimeoutMs(), 1, false,
+                        properties.connectTimeoutMs(), properties.readTimeoutMs(), 1,
+                        0, 0, properties.circuitFailureThreshold(), properties.circuitOpenDurationMs(), false,
                         properties.fallbackModel()))
                 : null;
+        Gauge.builder("opsmind.agent.planner.circuit.state", circuitBreaker, QwenPlannerCircuitBreaker::stateValue)
+                .description("Qwen planner circuit state: closed=0, half-open=0.5, open=1")
+                .register(meterRegistry);
     }
 
     @Override
     public AgentPlan plan(String query) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        String outcome = "error";
+        try {
+            AgentPlan result = planWithResilience(query);
+            outcome = "local-fallback".equals(result.provider()) ? "fallback" : "qwen";
+            return result;
+        } finally {
+            meterRegistry.counter("opsmind.agent.planner.requests", "outcome", outcome).increment();
+            sample.stop(Timer.builder("opsmind.agent.planner.duration")
+                    .description("End-to-end planner decision latency")
+                    .tag("outcome", outcome)
+                    .register(meterRegistry));
+        }
+    }
+
+    private AgentPlan planWithResilience(String query) {
         validateConfiguration();
+        if (!circuitBreaker.tryAcquirePermission()) {
+            meterRegistry.counter("opsmind.agent.planner.circuit.rejected").increment();
+            return recover(query, new AgentException(
+                    "AGENT_PLANNER_CIRCUIT_OPEN", "Qwen planner circuit is open", HttpStatus.SERVICE_UNAVAILABLE), 0);
+        }
         QwenPlannerRequest request = new QwenPlannerRequest(
                 properties.model(),
                 List.of(new QwenMessage("system", SYSTEM_PROMPT), new QwenMessage("user", query)),
@@ -76,30 +137,65 @@ public class QwenAgentPlanner implements AgentPlanner {
                         .body(request)
                         .retrieve()
                         .body(QwenPlannerResponse.class);
-                return parse(response);
+                AgentPlan result = parse(response);
+                meterRegistry.counter("opsmind.agent.planner.attempts", "result", "success").increment();
+                circuitBreaker.onSuccess();
+                return result;
             } catch (RestClientResponseException exception) {
+                meterRegistry.counter("opsmind.agent.planner.attempts", "result", "http-error").increment();
                 AgentException mapped = providerError(exception);
                 if (!retryable(exception) || attempt == properties.maxAttempts()) {
-                    return recover(query, mapped, attempt);
+                    return failAndRecover(query, mapped, attempt);
                 }
+                pauseBeforeRetry(
+                        attempt, exception.getStatusCode().value() == 429 ? "rate-limited" : "server-error");
             } catch (RestClientException exception) {
+                meterRegistry.counter("opsmind.agent.planner.attempts", "result", "io-error").increment();
                 AgentException mapped = new AgentException(
                         "AGENT_PLANNER_PROVIDER_UNAVAILABLE", "Qwen planner service is unavailable",
                         HttpStatus.BAD_GATEWAY);
                 if (attempt == properties.maxAttempts()) {
-                    return recover(query, mapped, attempt);
+                    return failAndRecover(query, mapped, attempt);
                 }
+                pauseBeforeRetry(attempt, "unavailable");
             } catch (AgentException exception) {
-                return recover(query, exception, attempt);
+                meterRegistry.counter("opsmind.agent.planner.attempts", "result", "invalid-response").increment();
+                return failAndRecover(query, exception, attempt);
             }
         }
         throw new IllegalStateException("Agent planner retry loop exhausted unexpectedly");
+    }
+
+    private void pauseBeforeRetry(int failedAttempt, String reason) {
+        meterRegistry.counter("opsmind.agent.planner.retries", "reason", reason).increment();
+        long multiplier = 1L << Math.max(0, failedAttempt - 1);
+        long delayMs = Math.min(
+                properties.retryMaxBackoffMs(), properties.retryInitialBackoffMs() * multiplier);
+        try {
+            retrySleeper.sleep(delayMs);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AgentException(
+                    "AGENT_PLANNER_RETRY_INTERRUPTED", "Qwen planner retry was interrupted",
+                    HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private AgentPlan failAndRecover(String query, AgentException failure, int attempts) {
+        QwenPlannerCircuitBreaker.State previous = circuitBreaker.state();
+        circuitBreaker.onFailure();
+        if (previous != QwenPlannerCircuitBreaker.State.OPEN
+                && circuitBreaker.state() == QwenPlannerCircuitBreaker.State.OPEN) {
+            meterRegistry.counter("opsmind.agent.planner.circuit.opened").increment();
+        }
+        return recover(query, failure, attempts);
     }
 
     private AgentPlan recover(String query, AgentException failure, int attempts) {
         if (!properties.fallbackEnabled()) {
             throw failure;
         }
+        meterRegistry.counter("opsmind.agent.planner.fallbacks", "reason", failure.code()).increment();
         AgentPlan fallback = fallbackPlanner.plan(query);
         String reason = "Qwen规划失败(" + failure.code() + ", attempts=" + attempts + ")，已降级；"
                 + fallback.reason();
@@ -192,5 +288,10 @@ public class QwenAgentPlanner implements AgentPlanner {
     }
 
     record PlannerDecision(String taskType, String reason) {
+    }
+
+    @FunctionalInterface
+    interface RetrySleeper {
+        void sleep(long delayMs) throws InterruptedException;
     }
 }

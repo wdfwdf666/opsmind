@@ -12,7 +12,8 @@ class LocalAgentPlannerTests {
     private final LocalAgentPlanner planner = new LocalAgentPlanner(
             new AgentPlannerProperties(
                     "local", "local-intent-router-v2", "", "", 256,
-                    2000, 5000, 1, false, "local-intent-router-v2"));
+                    2000, 5000, 1, 0, 0, 5, 30000,
+                    false, "local-intent-router-v2"));
 
     @Test
     void shouldSelectTicketOnlyForExplicitCreateIntent() {
