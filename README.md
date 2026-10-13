@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 19 步：Qwen 结构化 Planner 与受控任务路由（FEAT-018 / VERIFY-004）**。
+当前完成 **第 20 步：Agent Planner 路由评测闭环（FEAT-019 / EVAL-007）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -42,9 +42,11 @@
 - 已接入 Qwen 结构化 Planner；省略 `taskType` 时，模型只可在 `KNOWLEDGE_QA`、`CREATE_TICKET` 白名单中路由，服务端严格校验 JSON、字段和枚举。
 - Planner 只负责路由，工具选择、状态机和风险策略仍由服务端控制；创建工单依旧停在 `WAITING_APPROVAL`。显式 `taskType` 作为调试覆盖，不调用 Planner。
 - 已通过 Flyway V8 持久化任务来源、Planner Provider、模型和理由；API 与审计轨迹可区分 `PLANNER` 和 `EXPLICIT`。
+- 已新增 24 条平衡的 `opsmind-agent-routing-v1` 路由评测集，覆盖知识问答、显式/间接写意图、否定句、流程咨询、歧义请求与 Prompt Injection；评测只调用 Planner，不执行工具或创建工单。
+- 已新增 Agent 路由评测 API，计算 Accuracy、Macro Precision/Recall/F1、分类别指标、危险写误路由率、P50/P95 和逐用例结果。本地规则基线 Accuracy=0.875、Macro-F1=0.8748、危险写误路由率=0.1667，保留 3 条失败用例用于后续回归。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：78 个，全部通过。
+- 当前自动化测试：82 个，全部通过。
 
 本地验证：
 
@@ -93,6 +95,7 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 - 批准或拒绝写工具：`POST http://localhost:8080/api/v1/agent/runs/{runId}/approval`
 - 固定检索评测：`POST http://localhost:8080/api/v1/evaluations/retrieval/run`
 - 固定回答评测：`POST http://localhost:8080/api/v1/evaluations/answers/run`
+- Agent 路由评测：`POST http://localhost:8080/api/v1/evaluations/agent-routing/run`
 - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
 - OpenAPI JSON：`http://localhost:8080/v3/api-docs`
 
@@ -147,7 +150,7 @@ RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型�
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未完成独立数据集验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。Planner 当前是单次二分类路由，尚无独立工具选择评测集、超时重试或模型降级；Planner 调用失败发生在 Run 创建前，因此没有失败 Run ID。审批也没有绑定登录用户、RBAC 或过期时间。下一步建立任务路由评测集，再增加 Planner 降级、认证身份、审批权限与操作人审计。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩。当前 BM25 基线仍在 JVM 计算分数，不适合大规模生产。路由评测只有 24 条人工样本，local 基线在否定句、流程咨询和间接写意图上有 3 条失败；Qwen 尚未运行该评测，不能声称其路由准确率。Planner 调用也没有超时重试或降级，失败发生在 Run 创建前。审批尚未绑定登录用户、RBAC 或过期时间。下一步划分路由开发集与独立测试集，再优化否定/咨询识别并增加 Planner 降级和失败审计。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 
