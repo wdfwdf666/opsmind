@@ -4,6 +4,7 @@ import com.opsmind.common.api.ApiResponse;
 import com.opsmind.rag.application.RagAnswerService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,6 +38,11 @@ public class RagAnswerController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "503", description = "Model provider is not configured", content = @Content)
     })
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(examples = @ExampleObject(
+                    name = "Automatic document selection",
+                    value = "{\"query\":\"数据库连接池告警应该检查什么？\",\"topK\":5}")))
     public ApiResponse<RagAnswerResponse> answer(@RequestBody RagAnswerRequest request) {
         return ApiResponse.success(RagAnswerResponse.from(
                 answerService.answer(request.query(), request.topK(), request.documentId())));

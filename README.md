@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 16 步：证据充足性门禁与低相关度拒答（FEAT-015 / EVAL-006）**。
+当前完成 **第 17 步：可审计的只读 Agent 运行闭环（FEAT-016 / VERIFY-002）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -32,9 +32,13 @@
 - 已提供版本化回答评测集与 API；v1 保留 6 个可回答和 2 个不可回答问题作为历史基线，v2 扩展到 6 个可回答和 14 个跨领域/相邻领域负样本，计算事实覆盖率、引用 Precision/Recall、拒答 Precision/Recall/F1、延迟、Token 用量和逐用例结果。
 - `faithfulnessProxy` 使用回答与所引原文的字符 bigram 覆盖率提供确定性回归信号，字段名明确标注为 Proxy，不把词面重合冒充语义忠实度；EVAL-005 已暴露当前拒答 F1 为 0 的真实缺陷。
 - 已新增生成前证据充足性门禁：Top-1 精排分数低于 `MINIMUM_EVIDENCE_SCORE` 时不调用 Chat 模型，返回 `LOW_RELEVANCE`、实际 `topEvidenceScore` 和确定性拒答；本地初始阈值 0.15 使 v2 拒答 F1 从 0 提升到 1.0。
+- 已实现首个确定性 Agent 状态机：`RECEIVED → PLANNED → TOOL_CALL → RESPONDED`，通过只读 `knowledge_search` 工具复用完整 RAG 回答链路。
+- 已实现工具风险分级：`READ_ONLY` 可自动执行，`WRITE_REQUIRES_APPROVAL` 与 `PROHIBITED` 不进入工具执行；当前 API 只暴露只读知识检索工具。
+- 已通过 Flyway V6 持久化 `agent_run` 与 `agent_step`，保存运行状态、拒答原因、引用、工具风险和脱敏步骤元数据；支持按 Run ID 回读完整有序审计轨迹。
+- Agent 与 RAG Swagger 示例默认不传 `documentId`，由检索链路自动跨文档选择；该字段只用于调试或评测时限定单文档范围。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：60 个，全部通过。
+- 当前自动化测试：65 个，全部通过。
 
 本地验证：
 
@@ -78,6 +82,8 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 - 混合检索：`POST http://localhost:8080/api/v1/search/hybrid`
 - 混合召回 + 精排：`POST http://localhost:8080/api/v1/search/reranked`
 - 带引用 RAG 回答：`POST http://localhost:8080/api/v1/rag/answer`
+- 启动只读 Agent：`POST http://localhost:8080/api/v1/agent/runs`
+- 查看 Agent 运行与审计：`GET http://localhost:8080/api/v1/agent/runs/{runId}`
 - 固定检索评测：`POST http://localhost:8080/api/v1/evaluations/retrieval/run`
 - 固定回答评测：`POST http://localhost:8080/api/v1/evaluations/answers/run`
 - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
@@ -89,7 +95,15 @@ docker exec -it opsmind-postgres-1 psql -U opsmind -d opsmind
 curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 ```
 
-上传响应中的 `documentId` 用于触发解析、分块、向量化和限定检索范围。在 Swagger UI 中可按“上传 → 触发解析 → 重建分块 → 重建向量 → 精排检索 → RAG 回答”的顺序完成调试。检索接口与 RAG 回答接口使用相同的三个输入字段：
+上传响应中的 `documentId` 用于触发解析、分块、向量化，也可用于调试时限定检索范围。在 Swagger UI 中可按“上传 → 触发解析 → 重建分块 → 重建向量 → Agent Runs”的顺序完成调试。实际问答默认不选择文档，只提交问题，由 RAG 在全部已向量化文档中自动检索：
+
+```json
+{
+  "query": "数据库连接池告警应该检查什么？"
+}
+```
+
+仅在排查某篇文档、做单文档评测或复现实验时才传 `documentId`：
 
 ```json
 {
@@ -99,7 +113,7 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 }
 ```
 
-RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型名和供应商 Token 用量。回答中的 `[S1]` 与 `citations[].sourceId` 对应，引用对象包含文档、Parent/Child Chunk、标题路径、片段和精排分数。评测接口可通过 `strategy` 选择 `VECTOR`、`HYBRID` 或 `RERANKED`；未提供时保持兼容，默认使用 `VECTOR`。`/search`、`/search/hybrid` 和 `/search/reranked` 主要用于检索调试、降级和对照，面向最终问答时使用 `/rag/answer`。
+RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型名和供应商 Token 用量。回答中的 `[S1]` 与 `citations[].sourceId` 对应，引用对象包含文档、Parent/Child Chunk、标题路径、片段和精排分数。Agent 响应在此基础上增加 `runId`、运行状态和 `steps`；后续可用 `GET /api/v1/agent/runs/{runId}` 回读。评测接口可通过 `strategy` 选择 `VECTOR`、`HYBRID` 或 `RERANKED`；未提供时保持兼容，默认使用 `VECTOR`。`/search`、`/search/hybrid` 和 `/search/reranked` 主要用于检索调试、降级和对照，面向最终问答时优先使用 `/agent/runs`，需要绕过 Agent 调试 RAG 时使用 `/rag/answer`。
 
 回答评测默认加载白名单数据集 `opsmind-answer-v2`，也可显式选择历史 `opsmind-answer-v1`；可通过 `documentId` 固定评测范围，并可选覆盖 `topK`。若生产配置使用 Qwen，未被门禁拒绝的用例会产生远程 Chat 调用，所有用例仍会产生远程 Embedding 与 Rerank 调用；本地回归应显式切换三个 Provider 为 `local`。
 
@@ -107,7 +121,7 @@ RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型�
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未获得数据外发授权验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。下一步应扩充多文档数据并划分校准集/独立测试集，然后开始实现可审计的 Agent 工具调用。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未获得数据外发授权验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。当前 Agent 是确定性单工具编排，还没有 Qwen Planner、多工具循环、运行预算、写工具审批与失败恢复。下一步实现工单草稿写工具和持久化审批状态，再引入结构化 Planner。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 
@@ -267,6 +281,8 @@ RECEIVED
 - 每次状态迁移持久化 `agent_run` 和 `agent_step`，支持失败恢复与完整审计。
 - 工具调用使用 `requestId` 做幂等，超时采用指数退避；不可重试的业务异常直接交回 Planner。
 - 通过 MCP 暴露“搜索知识库”和“查询工单”能力，同时保留普通 Function Calling 版本做对比。
+
+当前已落地的最小子集是 `RECEIVED → PLANNED → TOOL_CALL → RESPONDED`：Planner 暂为确定性路由，只调用 `knowledge_search`；每次运行和步骤均落库。下表其余工具、循环预算、审批恢复和 MCP 属于后续迭代目标。
 
 首期工具：
 

@@ -1,5 +1,6 @@
 package com.opsmind.common.api;
 
+import com.opsmind.agent.domain.AgentException;
 import com.opsmind.evaluation.domain.EvaluationException;
 import com.opsmind.knowledge.document.domain.DocumentException;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +10,12 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(AgentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAgentException(AgentException exception) {
+        return ResponseEntity.status(exception.status())
+                .body(ApiResponse.failure(exception.code(), exception.getMessage()));
+    }
 
     @ExceptionHandler(DocumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleDocumentException(DocumentException exception) {

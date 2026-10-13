@@ -2,6 +2,29 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-016] 建立可审计的只读 Agent 运行闭环
+
+- **日期**：2026-10-13
+- **类型**：功能 / Agent / 工具治理 / 审计
+- **状态**：已完成；本地 PostgreSQL 真实接口验证已通过
+- **关联需求或问题**：继续完成项目第 17 步；FEAT-015 只有 RAG 问答接口，没有 Agent Run、工具风险边界、状态轨迹和持久化审计，简历中的 Agent 工程能力仍停留在设计文档。
+- **问题**：直接由 Controller 调用 RAG 服务无法表达“接收任务、制定计划、调用工具、返回结果”的执行过程；后续加入工单写操作时也缺少统一的风险策略和审批边界。请求结束后没有 Run ID，故障与拒答过程无法按步骤回放。
+- **修改内容**：
+  - 新增确定性 Agent 状态机，按 `RECEIVED → PLANNED → TOOL_CALL → RESPONDED` 执行首个只读知识问答任务。
+  - 定义统一 `AgentTool` 契约和 `knowledge_search` 实现，复用 `RagAnswerService` 的混合召回、精排、证据门禁、生成与引用链路；正常请求省略 `documentId`，自动从全部可检索文档中选择证据。
+  - 新增 `READ_ONLY`、`WRITE_REQUIRES_APPROVAL`、`PROHIBITED` 风险级别和集中策略；只有只读工具可自动执行，写风险工具在调用前被拦截。
+  - 新增 Flyway V6 的 `agent_run`、`agent_step` 表，保存运行状态、回答、拒答、引用、错误码和有序步骤；步骤只记录字符数、Token 数、引用数、分数等紧凑元数据，不保存完整 Prompt 或证据正文。
+  - 新增 `POST /api/v1/agent/runs` 与 `GET /api/v1/agent/runs/{runId}`；Swagger 示例省略 `documentId`，同时修正原 RAG 示例，避免示例 UUID 被误当成真实文档范围。
+  - 新增状态机、风险拦截、查询校验、JDBC 完成/失败回读和 OpenAPI 路径测试；新增 VERIFY-002 工程验证报告。
+- **实现中发现的问题**：真实验证前错误使用了 `document` 表名，而项目实际表名为 `knowledge_document`；更正查询后确认数据库有 5 条文档记录、3 个 Child Chunk 和两套向量。Agent 请求不传 `documentId` 成功自动命中正确文档，说明先前 Swagger 中占位 UUID 导致 `NO_EVIDENCE`，不是 RAG 必须人工选文档。
+- **影响文件**：Agent domain/application/infrastructure/API、Flyway V6、全局异常处理、RAG/Agent Swagger 示例、OpenAPI 与 Agent 测试、`README.md`、`CHANGELOG.md`、VERIFY-002 报告。
+- **验证方式**：执行 Agent 定向测试、完整 `\.\mvnw.cmd test` 和打包；使用 PostgreSQL 17.11 + pgvector 0.8.7、本地三个 Provider，在临时端口调用不带 `documentId` 的 Agent POST，再按 `runId` GET 回读；追加域外问题验证拒答审计。
+- **验证结果**：65 个自动化测试通过，0 失败，0 错误。真实可回答请求状态为 `COMPLETED`，自动命中 `feat007.md > OpsMind 运维手册 > 告警处置`，Top-1=0.289683，产生 4 个有序步骤；域外问题以 `LOW_RELEVANCE` 拒答，Top-1=0.039513，同样产生 4 个步骤。数据库共保存 2 个完成 Run 和 8 个 Step。
+- **修改前指标**：0 个 Agent API；0 个工具契约；0 种风险策略；0 张 Agent 审计表；RAG 请求易误填 Swagger 占位文档 UUID。
+- **修改后指标**：2 个 Agent API；1 个可执行只读工具；3 个风险级别；2 张审计表；4 阶段可回放状态轨迹；5 个新增自动化测试。
+- **修改效果**：项目从“直接调用 RAG 服务”升级为“有运行身份、有工具边界、有状态轨迹、有持久化审计”的 Agent 最小闭环，并保持实际问答自动选文档。
+- **风险与后续**：当前 Planner 是确定性单工具路由，`COMPLETED` 表示工具链正常结束，回答仍可能是有依据的拒答；还没有多工具循环、并发状态控制、写工具审批、恢复与预算。下一步新增工单草稿工具和 `WAITING_APPROVAL` 状态，并用幂等键保护审批后的写操作。
+
 ## [FEAT-015] 增加证据充足性门禁与低相关度拒答
 
 - **日期**：2026-10-13
