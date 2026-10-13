@@ -46,10 +46,12 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
     public void create(AgentRun run) {
         jdbcTemplate.update("""
                         INSERT INTO agent_run
-                            (id, query_text, document_id, task_type, status, citations_json, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, query_text, document_id, task_type, task_type_source, planner_provider,
+                             planner_model, planner_reason, status, citations_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                run.id(), run.query(), run.documentId(), run.taskType().name(), run.status().name(), "[]",
+                run.id(), run.query(), run.documentId(), run.taskType().name(), run.taskTypeSource().name(),
+                run.plannerProvider(), run.plannerModel(), run.plannerReason(), run.status().name(), "[]",
                 Timestamp.from(run.createdAt()), Timestamp.from(run.updatedAt()));
     }
 
@@ -163,7 +165,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
     @Override
     public Optional<AgentRun> findRun(UUID runId) {
         List<AgentRun> runs = jdbcTemplate.query("""
-                        SELECT id, query_text, document_id, task_type, status, answer_text, refused, refusal_reason,
+                        SELECT id, query_text, document_id, task_type, task_type_source, planner_provider,
+                               planner_model, planner_reason, status, answer_text, refused, refusal_reason,
                                top_evidence_score, citations_json, error_code, error_message,
                                created_at, updated_at, completed_at
                         FROM agent_run
@@ -202,6 +205,10 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 resultSet.getString("query_text"),
                 resultSet.getObject("document_id", UUID.class),
                 AgentTaskType.valueOf(resultSet.getString("task_type")),
+                com.opsmind.agent.domain.AgentTaskTypeSource.valueOf(resultSet.getString("task_type_source")),
+                resultSet.getString("planner_provider"),
+                resultSet.getString("planner_model"),
+                resultSet.getString("planner_reason"),
                 AgentRunStatus.valueOf(resultSet.getString("status")),
                 resultSet.getString("answer_text"),
                 resultSet.getObject("refused", Boolean.class),

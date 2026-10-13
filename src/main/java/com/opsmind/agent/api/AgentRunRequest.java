@@ -14,7 +14,7 @@ public record AgentRunRequest(
         UUID documentId,
         @Schema(
                 nullable = true,
-                description = "Defaults to KNOWLEDGE_QA. CREATE_TICKET creates a draft and waits for approval.",
+                description = "Optional debug override. Omit it to let the configured Planner select an allowed task type.",
                 example = "KNOWLEDGE_QA")
         AgentTaskType taskType) {
 }

@@ -23,6 +23,13 @@ spring:
     validate-on-migrate: true
 
 opsmind:
+  agent:
+    planner:
+      provider: ${AGENT_PLANNER_PROVIDER:qwen}
+      model: ${AGENT_PLANNER_MODEL:${QWEN_PLANNER_MODEL:${QWEN_CHAT_MODEL:qwen3.7-plus}}}
+      base-url: ${QWEN_PLANNER_BASE_URL:${QWEN_CHAT_BASE_URL:${QWEN_BASE_URL:}}}
+      api-key: ${DASHSCOPE_API_KEY:}
+      max-output-tokens: ${QWEN_PLANNER_MAX_OUTPUT_TOKENS:256}
   document:
     max-size: 20MB
     storage-location: data/documents

@@ -4,6 +4,7 @@ import com.opsmind.agent.domain.AgentRun;
 import com.opsmind.agent.domain.AgentRunStatus;
 import com.opsmind.agent.domain.AgentRunView;
 import com.opsmind.agent.domain.AgentTaskType;
+import com.opsmind.agent.domain.AgentTaskTypeSource;
 import com.opsmind.rag.application.RagRefusalReason;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -16,6 +17,10 @@ public record AgentRunResponse(
         String query,
         @Schema(format = "uuid", nullable = true) UUID documentId,
         AgentTaskType taskType,
+        AgentTaskTypeSource taskTypeSource,
+        String plannerProvider,
+        String plannerModel,
+        String plannerReason,
         AgentRunStatus status,
         @Schema(nullable = true) String answer,
         @Schema(nullable = true) Boolean refused,
@@ -34,7 +39,8 @@ public record AgentRunResponse(
     static AgentRunResponse from(AgentRunView view) {
         AgentRun run = view.run();
         return new AgentRunResponse(
-                run.id(), run.query(), run.documentId(), run.taskType(), run.status(), run.answer(), run.refused(),
+                run.id(), run.query(), run.documentId(), run.taskType(), run.taskTypeSource(), run.plannerProvider(),
+                run.plannerModel(), run.plannerReason(), run.status(), run.answer(), run.refused(),
                 run.refusalReason(), run.topEvidenceScore(),
                 run.citations().stream().map(AgentCitationResponse::from).toList(),
                 run.errorCode(), run.errorMessage(), run.createdAt(), run.updatedAt(), run.completedAt(),

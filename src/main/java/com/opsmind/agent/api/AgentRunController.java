@@ -31,16 +31,16 @@ public class AgentRunController {
     @PostMapping
     @Operation(
             summary = "Start an Agent run",
-            description = "KNOWLEDGE_QA completes automatically; CREATE_TICKET returns a draft in WAITING_APPROVAL.")
+            description = "Omit taskType for Planner routing. KNOWLEDGE_QA completes automatically; CREATE_TICKET waits for approval.")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(
             required = true,
             content = @Content(examples = {
                     @ExampleObject(
                             name = "Automatic knowledge answer",
-                            value = "{\"query\":\"数据库连接池告警应该检查什么？\",\"taskType\":\"KNOWLEDGE_QA\"}"),
+                            value = "{\"query\":\"数据库连接池告警应该检查什么？\"}"),
                     @ExampleObject(
                             name = "Create ticket draft",
-                            value = "{\"query\":\"数据库连接池持续告警，请创建 P2 工单\",\"taskType\":\"CREATE_TICKET\"}")
+                            value = "{\"query\":\"数据库连接池持续告警，请创建 P2 工单\"}")
             }))
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Completed or waiting-approval run"),

@@ -11,6 +11,13 @@ spring:
     locations: classpath:db/migration
 
 opsmind:
+  agent:
+    planner:
+      provider: local
+      model: local-intent-router-v1
+      base-url:
+      api-key:
+      max-output-tokens: 256
   document:
     max-size: 20MB
     storage-location: target/test-documents

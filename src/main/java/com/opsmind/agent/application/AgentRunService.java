@@ -42,6 +42,7 @@ public class AgentRunService {
     private final AgentTool<AgentToolInput, RagAnswerResult> knowledgeSearchTool;
     private final AgentTool<CreateTicketInput, SupportTicket> createTicketTool;
     private final AgentToolPolicy toolPolicy;
+    private final AgentPlanner planner;
     private final Clock clock;
     private final Supplier<UUID> idSupplier;
     private final ObjectMapper objectMapper;
@@ -52,9 +53,10 @@ public class AgentRunService {
             SupportTicketRepository ticketRepository,
             KnowledgeSearchAgentTool knowledgeSearchTool,
             CreateTicketAgentTool createTicketTool,
-            AgentToolPolicy toolPolicy) {
+            AgentToolPolicy toolPolicy,
+            AgentPlanner planner) {
         this(
-                auditRepository, ticketRepository, knowledgeSearchTool, createTicketTool, toolPolicy,
+                auditRepository, ticketRepository, knowledgeSearchTool, createTicketTool, toolPolicy, planner,
                 Clock.systemUTC(), UUID::randomUUID, new ObjectMapper());
     }
 
@@ -64,6 +66,7 @@ public class AgentRunService {
             AgentTool<AgentToolInput, RagAnswerResult> knowledgeSearchTool,
             AgentTool<CreateTicketInput, SupportTicket> createTicketTool,
             AgentToolPolicy toolPolicy,
+            AgentPlanner planner,
             Clock clock,
             Supplier<UUID> idSupplier,
             ObjectMapper objectMapper) {
@@ -72,32 +75,36 @@ public class AgentRunService {
         this.knowledgeSearchTool = knowledgeSearchTool;
         this.createTicketTool = createTicketTool;
         this.toolPolicy = toolPolicy;
+        this.planner = planner;
         this.clock = clock;
         this.idSupplier = idSupplier;
         this.objectMapper = objectMapper;
     }
 
     public AgentRunView start(String rawQuery, UUID documentId) {
-        return start(rawQuery, documentId, AgentTaskType.KNOWLEDGE_QA);
+        return start(rawQuery, documentId, null);
     }
 
     public AgentRunView start(String rawQuery, UUID documentId, AgentTaskType requestedTaskType) {
         String query = validateQuery(rawQuery);
-        AgentTaskType taskType = requestedTaskType == null ? AgentTaskType.KNOWLEDGE_QA : requestedTaskType;
+        AgentPlan plan = requestedTaskType == null ? planner.plan(query) : AgentPlan.explicit(requestedTaskType);
+        AgentTaskType taskType = plan.taskType();
         UUID runId = idSupplier.get();
         Instant now = clock.instant();
         auditRepository.create(new AgentRun(
-                runId, query, documentId, taskType, AgentRunStatus.RUNNING,
+                runId, query, documentId, taskType, plan.source(), plan.provider(), plan.model(), plan.reason(),
+                AgentRunStatus.RUNNING,
                 null, null, null, null, List.of(), null, null, now, now, null));
         append(runId, 1, AgentStepType.RECEIVED, null, true,
                 Map.of(
                         "queryCharacters", query.length(),
                         "scope", documentId == null ? "ALL_DOCUMENTS" : "DOCUMENT",
-                        "taskType", taskType.name()));
+                        "taskType", taskType.name(),
+                        "taskTypeSource", plan.source().name()));
 
         return switch (taskType) {
-            case KNOWLEDGE_QA -> startKnowledgeRun(runId, query, documentId);
-            case CREATE_TICKET -> startTicketRun(runId, query, documentId);
+            case KNOWLEDGE_QA -> startKnowledgeRun(runId, query, documentId, plan);
+            case CREATE_TICKET -> startTicketRun(runId, query, documentId, plan);
         };
     }
 
@@ -167,9 +174,10 @@ public class AgentRunService {
                 ticketRepository.findByRunId(runId).orElse(null));
     }
 
-    private AgentRunView startKnowledgeRun(UUID runId, String query, UUID documentId) {
+    private AgentRunView startKnowledgeRun(UUID runId, String query, UUID documentId, AgentPlan plan) {
         append(runId, 2, AgentStepType.PLANNED, knowledgeSearchTool, true,
-                Map.of("strategy", "DETERMINISTIC_SINGLE_TOOL", "tool", knowledgeSearchTool.name()));
+                Map.of("strategy", "CONTROLLED_SINGLE_TOOL", "tool", knowledgeSearchTool.name(),
+                        "plannerProvider", plan.provider(), "plannerModel", plan.model(), "plannerReason", plan.reason()));
         RagAnswerResult answer = executeKnowledge(runId, query, documentId, 3);
         append(runId, 4, AgentStepType.RESPONDED, null, true,
                 Map.of("answerCharacters", answer.answer().length(), "totalTokens", value(answer.totalTokens())));
@@ -177,12 +185,15 @@ public class AgentRunService {
         return get(runId);
     }
 
-    private AgentRunView startTicketRun(UUID runId, String query, UUID documentId) {
+    private AgentRunView startTicketRun(UUID runId, String query, UUID documentId, AgentPlan plan) {
         append(runId, 2, AgentStepType.PLANNED, null, true,
                 Map.of(
                         "strategy", "DETERMINISTIC_APPROVAL_FLOW",
                         "readTool", knowledgeSearchTool.name(),
-                        "writeTool", createTicketTool.name()));
+                        "writeTool", createTicketTool.name(),
+                        "plannerProvider", plan.provider(),
+                        "plannerModel", plan.model(),
+                        "plannerReason", plan.reason()));
         RagAnswerResult evidence = executeKnowledge(runId, query, documentId, 3);
         TicketDraft draft = ticketDraft(query, evidence);
         Instant requestedAt = clock.instant();

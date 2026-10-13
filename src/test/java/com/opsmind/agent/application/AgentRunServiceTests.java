@@ -10,6 +10,7 @@ import com.opsmind.agent.domain.AgentRunStatus;
 import com.opsmind.agent.domain.AgentStep;
 import com.opsmind.agent.domain.AgentStepType;
 import com.opsmind.agent.domain.AgentTaskType;
+import com.opsmind.agent.domain.AgentTaskTypeSource;
 import com.opsmind.agent.domain.AgentToolRisk;
 import com.opsmind.agent.domain.SupportTicket;
 import com.opsmind.agent.domain.SupportTicketRepository;
@@ -41,6 +42,8 @@ class AgentRunServiceTests {
         var view = fixture.service.start("  检查什么  ", null);
 
         assertThat(view.run().taskType()).isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(view.run().taskTypeSource()).isEqualTo(AgentTaskTypeSource.PLANNER);
+        assertThat(view.run().plannerModel()).isEqualTo("test-planner-v1");
         assertThat(view.run().status()).isEqualTo(AgentRunStatus.COMPLETED);
         assertThat(view.run().query()).isEqualTo("检查什么");
         assertThat(view.run().answer()).isEqualTo("检查连接池 [S1]");
@@ -59,6 +62,7 @@ class AgentRunServiceTests {
         var view = fixture.service.start("数据库连接池持续告警", null, AgentTaskType.CREATE_TICKET);
 
         assertThat(view.run().status()).isEqualTo(AgentRunStatus.WAITING_APPROVAL);
+        assertThat(view.run().taskTypeSource()).isEqualTo(AgentTaskTypeSource.EXPLICIT);
         assertThat(view.approval().status()).isEqualTo(AgentApprovalStatus.PENDING);
         assertThat(view.approval().draft().title()).isEqualTo("数据库连接池持续告警");
         assertThat(view.approval().draft().description()).contains("用户描述", "知识库建议", "检查连接池");
@@ -136,15 +140,44 @@ class AgentRunServiceTests {
         assertThat(fixture.auditRepository.runs).isEmpty();
     }
 
+    @Test
+    void shouldRouteTicketIntentThroughPlannerWhenTaskTypeIsOmitted() {
+        Fixture fixture = fixture(AgentToolRisk.READ_ONLY, AgentTaskType.CREATE_TICKET);
+
+        var view = fixture.service.start("数据库持续告警，请创建工单", null, null);
+
+        assertThat(view.run().taskType()).isEqualTo(AgentTaskType.CREATE_TICKET);
+        assertThat(view.run().taskTypeSource()).isEqualTo(AgentTaskTypeSource.PLANNER);
+        assertThat(view.run().plannerReason()).isEqualTo("test decision");
+        assertThat(view.run().status()).isEqualTo(AgentRunStatus.WAITING_APPROVAL);
+    }
+
+    @Test
+    void shouldHonorExplicitOverrideWithoutCallingPlanner() {
+        Fixture fixture = fixture(AgentToolRisk.READ_ONLY);
+
+        var view = fixture.service.start("请创建工单", null, AgentTaskType.KNOWLEDGE_QA);
+
+        assertThat(view.run().taskType()).isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(view.run().taskTypeSource()).isEqualTo(AgentTaskTypeSource.EXPLICIT);
+        assertThat(fixture.planner.calls).isZero();
+    }
+
     private Fixture fixture(AgentToolRisk knowledgeRisk) {
+        return fixture(knowledgeRisk, AgentTaskType.KNOWLEDGE_QA);
+    }
+
+    private Fixture fixture(AgentToolRisk knowledgeRisk, AgentTaskType plannedTaskType) {
         FakeAuditRepository auditRepository = new FakeAuditRepository();
         FakeTicketRepository ticketRepository = new FakeTicketRepository();
         StubKnowledgeTool knowledgeTool = new StubKnowledgeTool(knowledgeRisk);
         StubTicketTool ticketTool = new StubTicketTool(ticketRepository);
+        StubPlanner planner = new StubPlanner(plannedTaskType);
         AgentRunService service = new AgentRunService(
                 auditRepository, ticketRepository, knowledgeTool, ticketTool, new AgentToolPolicy(),
+                planner,
                 Clock.fixed(NOW, ZoneOffset.UTC), UUID::randomUUID, new ObjectMapper());
-        return new Fixture(service, auditRepository, ticketRepository, knowledgeTool, ticketTool);
+        return new Fixture(service, auditRepository, ticketRepository, knowledgeTool, ticketTool, planner);
     }
 
     private record Fixture(
@@ -152,7 +185,23 @@ class AgentRunServiceTests {
             FakeAuditRepository auditRepository,
             FakeTicketRepository ticketRepository,
             StubKnowledgeTool knowledgeTool,
-            StubTicketTool ticketTool) {
+            StubTicketTool ticketTool,
+            StubPlanner planner) {
+    }
+
+    private static final class StubPlanner implements AgentPlanner {
+        private final AgentTaskType taskType;
+        private int calls;
+
+        private StubPlanner(AgentTaskType taskType) {
+            this.taskType = taskType;
+        }
+
+        @Override
+        public AgentPlan plan(String query) {
+            calls++;
+            return new AgentPlan(taskType, AgentTaskTypeSource.PLANNER, "test", "test-planner-v1", "test decision");
+        }
     }
 
     private static final class StubKnowledgeTool implements AgentTool<AgentToolInput, RagAnswerResult> {
@@ -334,7 +383,8 @@ class AgentRunServiceTests {
                 Instant updatedAt,
                 Instant completedAt) {
             return new AgentRun(
-                    old.id(), old.query(), old.documentId(), old.taskType(), status,
+                    old.id(), old.query(), old.documentId(), old.taskType(), old.taskTypeSource(),
+                    old.plannerProvider(), old.plannerModel(), old.plannerReason(), status,
                     answer, refused, refusalReason, score, citations, errorCode, errorMessage,
                     old.createdAt(), updatedAt, completedAt);
         }

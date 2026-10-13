@@ -2,6 +2,23 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-018] 接入 Qwen 结构化 Planner 与受控任务路由
+
+- **日期**：2026-10-13
+- **类型**：功能 / Agent / 模型接入 / 审计
+- **状态**：已完成；自动化测试与 PostgreSQL 真实接口验证通过
+- **关联需求或问题**：继续完成项目第 19 步；FEAT-017 的 `taskType` 仍由调用方指定，省略后固定走知识问答。
+- **问题**：调用方必须知道内部任务枚举才能创建工单；已有审计无法判断任务是模型选择还是调用方覆盖。直接让模型返回工具名并执行还可能绕过服务端风险策略。
+- **修改内容**：新增 `AgentPlanner` 抽象以及 Qwen/local 实现；Qwen 使用温度 0、关闭 thinking、请求严格 JSON，只允许 `KNOWLEDGE_QA`、`CREATE_TICKET`。服务端拒绝未知字段、未知枚举和格式外文本。Planner 只做路由，状态机与 `AgentToolPolicy` 决定工具和权限。保留显式 `taskType` 调试覆盖。Flyway V8 持久化来源、Provider、模型和理由，并同步更新 API、Swagger、配置模板、README、VERIFY-004 与测试。
+- **实现中发现的问题**：V8 最初用一条 `ALTER TABLE` 添加四列，PostgreSQL 可用但 H2 2.4 测试库报错；拆成四条语句后兼容两种数据库。真实 local 验证时模型名继承 Qwen 默认值，因此补充独立 `AGENT_PLANNER_MODEL`，避免离线审计含糊。
+- **影响文件**：Agent Planner/config/domain/application/infrastructure/API、Flyway V8、配置模板、测试、文档与验证报告。
+- **验证方式**：执行完整 `\.\mvnw.cmd test`；在 PostgreSQL 17.11 上迁移 V8，以四个 local Provider 启动 18080 临时实例，调用自动知识问答、自动创建工单、拒绝审批和显式覆盖接口。
+- **验证结果**：78 个测试通过，0 失败，0 错误。真实接口健康状态 `UP`；知识请求为 `KNOWLEDGE_QA/PLANNER/COMPLETED`；创建请求为 `CREATE_TICKET/PLANNER/WAITING_APPROVAL`，拒绝后 `REJECTED` 且无 Ticket；显式覆盖为 `KNOWLEDGE_QA/EXPLICIT/COMPLETED`。
+- **修改前指标**：0 个 Planner；任务省略时固定知识问答；0 个路由来源字段；71 个测试。
+- **修改后指标**：2 个 Planner Provider；2 种受控任务类型；2 种任务来源；4 个持久化路由字段；78 个测试。
+- **修改效果**：Agent 从“调用方替模型选任务”升级为“模型提出受限任务、服务端按确定性策略执行”，并保持写操作审批、幂等和审计边界。
+- **风险与后续**：Qwen 契约已验证，但还没有独立标注集的模型路由准确率；Planner 调用失败发生在 Run 创建前。下一步建立路由评测集，统计 Macro-F1 与危险误路由率，并增加 Planner 超时、重试、降级和失败审计。
+
 ## [FEAT-017] 建立写工具与 Human-in-the-loop 审批闭环
 
 - **日期**：2026-10-13

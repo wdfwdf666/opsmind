@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-当前完成 **第 18 步：写工具与 Human-in-the-loop 审批闭环（FEAT-017 / VERIFY-003）**。
+当前完成 **第 19 步：Qwen 结构化 Planner 与受控任务路由（FEAT-018 / VERIFY-004）**。
 
 - Java 21 + Spring Boot 4.1.1，使用项目内置 Maven Wrapper，不依赖本机 Maven。
 - 已引入 Web MVC、Validation、Actuator，并通过 Spring AI 2.0.1 BOM 锁定后续 AI 依赖版本。
@@ -39,9 +39,12 @@
 - 已新增 `CREATE_TICKET` 任务：先自动调用只读 `knowledge_search` 生成 P2 工单草稿，再进入 `WAITING_APPROVAL`；审批前不会执行 `create_ticket` 写工具。
 - 已新增批准/拒绝接口；批准操作在同一数据库事务中更新审批、创建工单、追加审计步骤并完成 Run，拒绝则结束且不创建工单。`support_ticket.agent_run_id` 唯一约束保证每个 Run 最多一张工单，重复提交相同决定返回原结果。
 - 已通过 Flyway V7 持久化 `agent_approval`、`support_ticket` 和 `agent_run.task_type`；审批响应直接返回草稿、风险、决定、工单和完整状态轨迹。
+- 已接入 Qwen 结构化 Planner；省略 `taskType` 时，模型只可在 `KNOWLEDGE_QA`、`CREATE_TICKET` 白名单中路由，服务端严格校验 JSON、字段和枚举。
+- Planner 只负责路由，工具选择、状态机和风险策略仍由服务端控制；创建工单依旧停在 `WAITING_APPROVAL`。显式 `taskType` 作为调试覆盖，不调用 Planner。
+- 已通过 Flyway V8 持久化任务来源、Planner Provider、模型和理由；API 与审计轨迹可区分 `PLANNER` 和 `EXPLICIT`。
 - 已集成 Swagger UI，可在浏览器中查看接口模型、选择文件并直接发起调试请求。
 - 已配置健康检查、优雅停机和基础管理端点。
-- 当前自动化测试：71 个，全部通过。
+- 当前自动化测试：78 个，全部通过。
 
 本地验证：
 
@@ -57,11 +60,11 @@ docker compose -p opsmind up -d postgres
 
 ```powershell
 Copy-Item .env.example .env
-# 使用编辑器填写 DASHSCOPE_API_KEY、QWEN_BASE_URL、QWEN_RERANK_URL 和 QWEN_CHAT_BASE_URL
+# 使用编辑器填写 DASHSCOPE_API_KEY、QWEN_BASE_URL、QWEN_RERANK_URL、QWEN_CHAT_BASE_URL 和 Planner 配置
 .\mvnw.cmd spring-boot:run
 ```
 
-`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding、Rerank 与 Chat 的端点协议不同，分别使用 `QWEN_BASE_URL`、`QWEN_RERANK_URL` 与 `QWEN_CHAT_BASE_URL`；Chat URL 未配置时回退到 `QWEN_BASE_URL`，并在末尾追加 `/chat/completions`。不同地域的 URL 和 API Key 不通用，请以[阿里云百炼向量化文档](https://help.aliyun.com/zh/model-studio/embedding)、[文本排序文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)和[文本生成 API 文档](https://help.aliyun.com/zh/model-studio/qwen-api-reference/)为准。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER`、`GENERATION_PROVIDER` 都改为 `local`；本地 Provider 只用于确定性测试和链路演示，不能代表 Qwen 的语义效果。
+`.env` 已被 Git 忽略，仓库只提交不含真实密钥的 `.env.example`。配置值不要加引号，否则按 Properties 格式加载时引号可能成为值的一部分。系统环境变量的优先级高于 `.env`，CI/CD 和生产环境仍建议通过密钥管理服务注入。Embedding、Rerank 与 Chat/Planner 的端点协议不同，分别使用 `QWEN_BASE_URL`、`QWEN_RERANK_URL`、`QWEN_CHAT_BASE_URL` 与 `QWEN_PLANNER_BASE_URL`；Chat/Planner 未配置时回退到兼容接口 Base URL。若只需离线开发，可将 `.env` 中的 `EMBEDDING_PROVIDER`、`RERANKING_PROVIDER`、`GENERATION_PROVIDER`、`AGENT_PLANNER_PROVIDER` 都设为 `local`，并将 `AGENT_PLANNER_MODEL` 设为 `local-intent-router-v1`；本地 Provider 只用于确定性测试和链路演示，不能代表 Qwen 的语义效果。
 
 数据库物理文件通过绑定挂载保存在项目的 `data/postgres`，备份文件保存在 `data/backups`，两者均被 Git 忽略。物理文件是 PostgreSQL 内部格式，不应手工编辑；查看表数据可执行：
 
@@ -107,16 +110,15 @@ curl.exe -F "file=@README.md" http://localhost:8080/api/v1/documents
 }
 ```
 
-创建工单采用显式任务类型，避免首版依赖关键词猜测意图：
+创建工单同样由 Planner 自动识别，只需提交自然语言：
 
 ```json
 {
-  "query": "数据库连接池持续告警，请创建 P2 工单",
-  "taskType": "CREATE_TICKET"
+  "query": "数据库连接池持续告警，请创建 P2 工单"
 }
 ```
 
-首次响应为 `WAITING_APPROVAL`，其中 `approval.draft` 是待确认草稿。取得 `runId` 后调用审批接口：
+响应中的 `taskTypeSource=PLANNER`、`plannerProvider`、`plannerModel` 和 `plannerReason` 说明路由来源。需要固定回归路径时可显式传入 `taskType`，此时来源为 `EXPLICIT`，Planner 不会被调用。创建工单首次响应为 `WAITING_APPROVAL`，其中 `approval.draft` 是待确认草稿。取得 `runId` 后调用审批接口：
 
 ```json
 {
@@ -145,7 +147,7 @@ RAG 回答响应包含 `answer`、`refused`、`citations`、检索/生成模型�
 
 Swagger UI 默认在本地启用，生产环境可设置 `SWAGGER_ENABLED=false` 关闭 UI 和 API 文档。
 
-当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未完成独立数据集验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。`faithfulnessProxy` 只能发现明显的词面脱离，无法判断改写、逻辑蕴含或事实冲突。当前 Agent 仍是显式 `taskType` 的确定性编排，审批也没有绑定登录用户、RBAC 或过期时间；多实例并发重复请求可能得到一次 409，但数据库唯一约束仍会阻止重复工单。下一步增加认证身份、审批权限/租约和操作人审计，再接入 Qwen 结构化 Planner 与运行预算。
+当前限制：检索与回答评测仍只有 1 篇文档、3 个 Child Chunk 和 20 条回答用例，只能作为工程回归框架，不能代表生产准确率。v2 数据同时参与了本地阈值探索和结果验证，因此 EVAL-006 的 1.0 不是独立测试集成绩，存在过拟合风险；Qwen Reranker 的分数分布尚未完成独立数据集验证。P95 也是少量顺序请求的观测值，不是并发压测结果。当前 BM25 基线会在请求时从 PostgreSQL 读取限定范围内的全部 Child Chunk 并在 JVM 计算分数，不适合大规模生产。Planner 当前是单次二分类路由，尚无独立工具选择评测集、超时重试或模型降级；Planner 调用失败发生在 Run 创建前，因此没有失败 Run ID。审批也没有绑定登录用户、RBAC 或过期时间。下一步建立任务路由评测集，再增加 Planner 降级、认证身份、审批权限与操作人审计。
 
 ## 1. 为什么这个项目适合 Agent 开发工程师简历
 

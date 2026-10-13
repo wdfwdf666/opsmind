@@ -8,6 +8,7 @@ import com.opsmind.agent.domain.AgentRunStatus;
 import com.opsmind.agent.domain.AgentStep;
 import com.opsmind.agent.domain.AgentStepType;
 import com.opsmind.agent.domain.AgentTaskType;
+import com.opsmind.agent.domain.AgentTaskTypeSource;
 import com.opsmind.agent.domain.AgentToolRisk;
 import com.opsmind.agent.domain.TicketDraft;
 import com.opsmind.agent.domain.TicketPriority;
@@ -35,7 +36,9 @@ class JdbcAgentAuditRepositoryTests {
         UUID documentId = UUID.randomUUID();
         Instant createdAt = Instant.parse("2026-10-13T05:00:00Z");
         repository.create(new AgentRun(
-                runId, "自动选择文档", null, AgentTaskType.KNOWLEDGE_QA, AgentRunStatus.RUNNING,
+                runId, "自动选择文档", null, AgentTaskType.KNOWLEDGE_QA,
+                AgentTaskTypeSource.PLANNER, "local", "local-intent-router-v1", "知识问答",
+                AgentRunStatus.RUNNING,
                 null, null, null, null, List.of(), null, null, createdAt, createdAt, null));
         repository.appendStep(new AgentStep(
                 UUID.randomUUID(), runId, 1, AgentStepType.RECEIVED,
@@ -53,6 +56,8 @@ class JdbcAgentAuditRepositoryTests {
         AgentRun stored = repository.findRun(runId).orElseThrow();
         assertThat(stored.status()).isEqualTo(AgentRunStatus.COMPLETED);
         assertThat(stored.documentId()).isNull();
+        assertThat(stored.taskTypeSource()).isEqualTo(AgentTaskTypeSource.PLANNER);
+        assertThat(stored.plannerModel()).isEqualTo("local-intent-router-v1");
         assertThat(stored.answer()).isEqualTo("检查连接池 [S1]");
         assertThat(stored.citations()).containsExactly(citation);
         assertThat(repository.findSteps(runId)).singleElement()
@@ -67,7 +72,9 @@ class JdbcAgentAuditRepositoryTests {
         UUID runId = UUID.randomUUID();
         Instant now = Instant.parse("2026-10-13T05:10:00Z");
         repository.create(new AgentRun(
-                runId, "失败请求", null, AgentTaskType.KNOWLEDGE_QA, AgentRunStatus.RUNNING,
+                runId, "失败请求", null, AgentTaskType.KNOWLEDGE_QA,
+                AgentTaskTypeSource.EXPLICIT, "request", "explicit-override", "显式指定",
+                AgentRunStatus.RUNNING,
                 null, null, null, null, List.of(), null, null, now, now, null));
         repository.appendStep(new AgentStep(
                 UUID.randomUUID(), runId, 1, AgentStepType.TOOL_CALL,
@@ -87,7 +94,9 @@ class JdbcAgentAuditRepositoryTests {
         UUID runId = UUID.randomUUID();
         Instant now = Instant.parse("2026-10-13T05:20:00Z");
         repository.create(new AgentRun(
-                runId, "创建告警工单", null, AgentTaskType.CREATE_TICKET, AgentRunStatus.RUNNING,
+                runId, "创建告警工单", null, AgentTaskType.CREATE_TICKET,
+                AgentTaskTypeSource.PLANNER, "qwen", "qwen3.7-plus", "创建工单意图",
+                AgentRunStatus.RUNNING,
                 null, null, null, null, List.of(), null, null, now, now, null));
         RagAnswerResult evidence = new RagAnswerResult(
                 "创建告警工单", null, "retrieval", "generation", false,
