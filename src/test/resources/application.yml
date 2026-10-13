@@ -18,6 +18,11 @@ opsmind:
       base-url:
       api-key:
       max-output-tokens: 256
+      connect-timeout-ms: 2000
+      read-timeout-ms: 5000
+      max-attempts: 2
+      fallback-enabled: true
+      fallback-model: local-intent-router-v2
   document:
     max-size: 20MB
     storage-location: target/test-documents

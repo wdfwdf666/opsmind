@@ -19,6 +19,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class QwenAgentPlannerTests {
@@ -86,9 +87,74 @@ class QwenAgentPlannerTests {
         server.verify();
     }
 
+    @Test
+    void shouldRetryTransientFailureAndReturnQwenDecision() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        QwenAgentPlanner planner = planner(
+                "https://workspace.example/v1", "secret", builder, 2, true);
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS));
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withSuccess("""
+                        {"choices":[{"message":{"role":"assistant","content":"{\\"taskType\\":\\"KNOWLEDGE_QA\\",\\"reason\\":\\"知识咨询\\"}"}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var plan = planner.plan("连接池告警怎么处理？");
+
+        assertThat(plan.taskType()).isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(plan.provider()).isEqualTo("qwen");
+        server.verify();
+    }
+
+    @Test
+    void shouldFallbackAfterRetriesAndKeepConservativeLocalRouting() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        QwenAgentPlanner planner = planner(
+                "https://workspace.example/v1", "secret", builder, 2, true);
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withServerError());
+
+        var plan = planner.plan("不要创建工单，只告诉我怎么排查");
+
+        assertThat(plan.taskType()).isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(plan.provider()).isEqualTo("local-fallback");
+        assertThat(plan.model()).isEqualTo("local-intent-router-v2");
+        assertThat(plan.reason()).contains("AGENT_PLANNER_PROVIDER_ERROR", "attempts=2", "否定表达");
+        server.verify();
+    }
+
+    @Test
+    void shouldNotRetryNonTransientClientErrorBeforeFallback() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        QwenAgentPlanner planner = planner(
+                "https://workspace.example/v1", "secret", builder, 3, true);
+        server.expect(requestTo("https://workspace.example/v1/chat/completions"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED));
+
+        var plan = planner.plan("数据库连接池告警怎么处理？");
+
+        assertThat(plan.taskType()).isEqualTo(AgentTaskType.KNOWLEDGE_QA);
+        assertThat(plan.provider()).isEqualTo("local-fallback");
+        assertThat(plan.reason()).contains("AGENT_PLANNER_PROVIDER_ERROR", "attempts=1");
+        server.verify();
+    }
+
     private QwenAgentPlanner planner(String baseUrl, String apiKey, RestClient.Builder builder) {
+        return planner(baseUrl, apiKey, builder, 1, false);
+    }
+
+    private QwenAgentPlanner planner(
+            String baseUrl, String apiKey, RestClient.Builder builder, int maxAttempts, boolean fallbackEnabled) {
         ObjectMapper mapper = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         return new QwenAgentPlanner(
-                new AgentPlannerProperties("qwen", "qwen3.7-plus", baseUrl, apiKey, 256), builder, mapper);
+                new AgentPlannerProperties(
+                        "qwen", "qwen3.7-plus", baseUrl, apiKey, 256,
+                        2000, 5000, maxAttempts, fallbackEnabled, "local-intent-router-v2"),
+                builder, mapper);
     }
 }

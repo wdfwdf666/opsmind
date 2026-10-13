@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsmind.agent.application.AgentPlan;
 import com.opsmind.agent.application.AgentPlanner;
+import com.opsmind.agent.application.LocalAgentPlanner;
 import com.opsmind.agent.config.AgentPlannerProperties;
 import com.opsmind.agent.domain.AgentException;
 import com.opsmind.agent.domain.AgentTaskType;
@@ -14,11 +15,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -37,10 +41,11 @@ public class QwenAgentPlanner implements AgentPlanner {
     private final AgentPlannerProperties properties;
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final LocalAgentPlanner fallbackPlanner;
 
     @Autowired
     public QwenAgentPlanner(AgentPlannerProperties properties) {
-        this(properties, RestClient.builder(), strictObjectMapper());
+        this(properties, productionRestClient(properties), strictObjectMapper());
     }
 
     QwenAgentPlanner(
@@ -48,6 +53,12 @@ public class QwenAgentPlanner implements AgentPlanner {
         this.properties = properties;
         this.restClient = restClientBuilder.build();
         this.objectMapper = objectMapper;
+        this.fallbackPlanner = properties.fallbackEnabled()
+                ? new LocalAgentPlanner(new AgentPlannerProperties(
+                        "local", properties.fallbackModel(), "", "", properties.maxOutputTokens(),
+                        properties.connectTimeoutMs(), properties.readTimeoutMs(), 1, false,
+                        properties.fallbackModel()))
+                : null;
     }
 
     @Override
@@ -57,24 +68,56 @@ public class QwenAgentPlanner implements AgentPlanner {
                 properties.model(),
                 List.of(new QwenMessage("system", SYSTEM_PROMPT), new QwenMessage("user", query)),
                 0, properties.maxOutputTokens(), false, Map.of("type", "json_object"));
-        try {
-            QwenPlannerResponse response = restClient.post()
-                    .uri(endpoint())
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
-                    .body(request)
-                    .retrieve()
-                    .body(QwenPlannerResponse.class);
-            return parse(response);
-        } catch (RestClientResponseException exception) {
-            throw new AgentException(
-                    "AGENT_PLANNER_PROVIDER_ERROR",
-                    "Qwen planner request failed with HTTP " + exception.getStatusCode().value(),
-                    HttpStatus.BAD_GATEWAY);
-        } catch (RestClientException exception) {
-            throw new AgentException(
-                    "AGENT_PLANNER_PROVIDER_UNAVAILABLE", "Qwen planner service is unavailable",
-                    HttpStatus.BAD_GATEWAY);
+        for (int attempt = 1; attempt <= properties.maxAttempts(); attempt++) {
+            try {
+                QwenPlannerResponse response = restClient.post()
+                        .uri(endpoint())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
+                        .body(request)
+                        .retrieve()
+                        .body(QwenPlannerResponse.class);
+                return parse(response);
+            } catch (RestClientResponseException exception) {
+                AgentException mapped = providerError(exception);
+                if (!retryable(exception) || attempt == properties.maxAttempts()) {
+                    return recover(query, mapped, attempt);
+                }
+            } catch (RestClientException exception) {
+                AgentException mapped = new AgentException(
+                        "AGENT_PLANNER_PROVIDER_UNAVAILABLE", "Qwen planner service is unavailable",
+                        HttpStatus.BAD_GATEWAY);
+                if (attempt == properties.maxAttempts()) {
+                    return recover(query, mapped, attempt);
+                }
+            } catch (AgentException exception) {
+                return recover(query, exception, attempt);
+            }
         }
+        throw new IllegalStateException("Agent planner retry loop exhausted unexpectedly");
+    }
+
+    private AgentPlan recover(String query, AgentException failure, int attempts) {
+        if (!properties.fallbackEnabled()) {
+            throw failure;
+        }
+        AgentPlan fallback = fallbackPlanner.plan(query);
+        String reason = "Qwen规划失败(" + failure.code() + ", attempts=" + attempts + ")，已降级；"
+                + fallback.reason();
+        return new AgentPlan(
+                fallback.taskType(), AgentTaskTypeSource.PLANNER, "local-fallback",
+                properties.fallbackModel(), reason);
+    }
+
+    private AgentException providerError(RestClientResponseException exception) {
+        return new AgentException(
+                "AGENT_PLANNER_PROVIDER_ERROR",
+                "Qwen planner request failed with HTTP " + exception.getStatusCode().value(),
+                HttpStatus.BAD_GATEWAY);
+    }
+
+    private boolean retryable(RestClientResponseException exception) {
+        int status = exception.getStatusCode().value();
+        return status == 429 || status >= 500;
     }
 
     private AgentPlan parse(QwenPlannerResponse response) {
@@ -119,6 +162,15 @@ public class QwenAgentPlanner implements AgentPlanner {
 
     private static ObjectMapper strictObjectMapper() {
         return new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    }
+
+    private static RestClient.Builder productionRestClient(AgentPlannerProperties properties) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(properties.connectTimeoutMs()))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofMillis(properties.readTimeoutMs()));
+        return RestClient.builder().requestFactory(requestFactory);
     }
 
     record QwenPlannerRequest(

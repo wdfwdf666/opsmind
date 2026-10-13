@@ -30,6 +30,11 @@ opsmind:
       base-url: ${QWEN_PLANNER_BASE_URL:${QWEN_CHAT_BASE_URL:${QWEN_BASE_URL:}}}
       api-key: ${DASHSCOPE_API_KEY:}
       max-output-tokens: ${QWEN_PLANNER_MAX_OUTPUT_TOKENS:256}
+      connect-timeout-ms: ${QWEN_PLANNER_CONNECT_TIMEOUT_MS:2000}
+      read-timeout-ms: ${QWEN_PLANNER_READ_TIMEOUT_MS:5000}
+      max-attempts: ${QWEN_PLANNER_MAX_ATTEMPTS:2}
+      fallback-enabled: ${QWEN_PLANNER_FALLBACK_ENABLED:true}
+      fallback-model: ${AGENT_PLANNER_FALLBACK_MODEL:local-intent-router-v2}
   document:
     max-size: 20MB
     storage-location: data/documents

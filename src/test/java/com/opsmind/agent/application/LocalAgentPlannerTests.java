@@ -10,7 +10,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalAgentPlannerTests {
 
     private final LocalAgentPlanner planner = new LocalAgentPlanner(
-            new AgentPlannerProperties("local", "local-intent-router-v2", "", "", 256));
+            new AgentPlannerProperties(
+                    "local", "local-intent-router-v2", "", "", 256,
+                    2000, 5000, 1, false, "local-intent-router-v2"));
 
     @Test
     void shouldSelectTicketOnlyForExplicitCreateIntent() {
