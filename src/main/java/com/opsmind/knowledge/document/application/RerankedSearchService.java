@@ -11,6 +11,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 检索最终阶段：先用混合检索快速召回，再让 Reranker 对候选做更精确的相关性排序。
+ * <p>这是典型的“两阶段检索”：召回阶段追求不遗漏，重排阶段追求前几名准确。</p>
+ */
 @Service
 public class RerankedSearchService {
 
@@ -42,6 +46,7 @@ public class RerankedSearchService {
                 embeddingProperties.maxTopK(),
                 Math.max(rerankingProperties.minimumCandidates(), topK * rerankingProperties.candidateMultiplier()));
         SemanticSearchResult hybridResult = hybridSearchService.search(query, candidateLimit, documentId);
+        // Provider 是可替换接口：可配置 Qwen 重排，也可在本地使用词法重排实现。
         List<SemanticSearchHit> reranked = rerankingProvider.rerank(
                 hybridResult.query(), hybridResult.hits(), topK);
         return new SemanticSearchResult(

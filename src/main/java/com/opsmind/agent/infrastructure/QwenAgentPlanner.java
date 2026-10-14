@@ -31,7 +31,12 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 使用 Qwen 判断 Agent 任务类型的 Planner，并提供重试、熔断、指标和本地降级。
+ * <p>模型只返回受约束的结构化决策，真正可执行的工具仍由 AgentRunService 和策略代码控制。</p>
+ */
 @Component
+// 通过配置选择实现，避免在业务代码中写 if (provider == "qwen")。
 @ConditionalOnProperty(prefix = "opsmind.agent.planner", name = "provider", havingValue = "qwen", matchIfMissing = true)
 public class QwenAgentPlanner implements AgentPlanner {
 
@@ -103,6 +108,7 @@ public class QwenAgentPlanner implements AgentPlanner {
 
     @Override
     public AgentPlan plan(String query) {
+        // Timer.Sample 在 finally 中停止，因此成功、降级和异常都会留下耗时指标。
         Timer.Sample sample = Timer.start(meterRegistry);
         String outcome = "error";
         try {
@@ -120,6 +126,7 @@ public class QwenAgentPlanner implements AgentPlanner {
 
     private AgentPlan planWithResilience(String query) {
         validateConfiguration();
+        // 熔断打开时不再请求故障服务，立即走本地 Planner，避免请求堆积拖垮应用。
         if (!circuitBreaker.tryAcquirePermission()) {
             meterRegistry.counter("opsmind.agent.planner.circuit.rejected").increment();
             return recover(query, new AgentException(
@@ -129,6 +136,7 @@ public class QwenAgentPlanner implements AgentPlanner {
                 properties.model(),
                 List.of(new QwenMessage("system", SYSTEM_PROMPT), new QwenMessage("user", query)),
                 0, properties.maxOutputTokens(), false, Map.of("type", "json_object"));
+        // 仅对限流、服务端错误和网络故障重试；非法响应重试通常没有意义。
         for (int attempt = 1; attempt <= properties.maxAttempts(); attempt++) {
             try {
                 QwenPlannerResponse response = restClient.post()
@@ -168,6 +176,7 @@ public class QwenAgentPlanner implements AgentPlanner {
 
     private void pauseBeforeRetry(int failedAttempt, String reason) {
         meterRegistry.counter("opsmind.agent.planner.retries", "reason", reason).increment();
+        // 1、2、4... 倍指数退避，并由 maxBackoff 限制上限，降低对故障服务的压力。
         long multiplier = 1L << Math.max(0, failedAttempt - 1);
         long delayMs = Math.min(
                 properties.retryMaxBackoffMs(), properties.retryInitialBackoffMs() * multiplier);
@@ -196,6 +205,7 @@ public class QwenAgentPlanner implements AgentPlanner {
             throw failure;
         }
         meterRegistry.counter("opsmind.agent.planner.fallbacks", "reason", failure.code()).increment();
+        // local-intent-router-v2 不是大语言模型，而是本地确定性关键词路由规则的版本标识。
         AgentPlan fallback = fallbackPlanner.plan(query);
         String reason = "Qwen规划失败(" + failure.code() + ", attempts=" + attempts + ")，已降级；"
                 + fallback.reason();
@@ -257,6 +267,7 @@ public class QwenAgentPlanner implements AgentPlanner {
     }
 
     private static ObjectMapper strictObjectMapper() {
+        // 模型多返回未知字段也视为协议错误，防止供应商响应悄悄漂移。
         return new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
@@ -269,6 +280,7 @@ public class QwenAgentPlanner implements AgentPlanner {
         return RestClient.builder().requestFactory(requestFactory);
     }
 
+    // 以下内部 record 映射 Qwen 的请求/响应 JSON，不向项目其他模块暴露。
     record QwenPlannerRequest(
             String model,
             List<QwenMessage> messages,

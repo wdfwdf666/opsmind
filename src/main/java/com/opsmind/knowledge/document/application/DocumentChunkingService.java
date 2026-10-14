@@ -16,6 +16,9 @@ import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 文档分块用例：读取已解析正文，调用纯分块算法，并原子替换数据库中的旧分块。
+ */
 @Service
 public class DocumentChunkingService {
 
@@ -52,6 +55,7 @@ public class DocumentChunkingService {
 
     public DocumentChunkingResult rebuild(UUID documentId) {
         requireDocument(documentId);
+        // 解析完成是分块的前置条件，因此缺少正文返回 409 Conflict，而不是 404。
         DocumentContent content = contentRepository.findByDocumentId(documentId)
                 .orElseThrow(() -> new DocumentException(
                         "DOCUMENT_CONTENT_NOT_READY",
@@ -59,6 +63,7 @@ public class DocumentChunkingService {
                         HttpStatus.CONFLICT));
         List<DocumentChunk> chunks = chunker.chunk(
                 documentId, content.title(), content.text(), clock.instant());
+        // replaceAll 应在事务中先删后插；任何一步失败都回滚，防止只留下半套分块。
         chunkRepository.replaceAll(documentId, chunks);
         int parentCount = (int) chunks.stream().filter(chunk -> chunk.type() == ChunkType.PARENT).count();
         int childCount = chunks.size() - parentCount;

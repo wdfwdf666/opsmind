@@ -17,6 +17,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+/**
+ * Agent 状态机的 HTTP 入口：启动任务、人工审批、查询完整审计轨迹。
+ */
 @RestController
 @RequestMapping("/api/v1/agent/runs")
 @Tag(name = "Agent Runs", description = "Execute and inspect auditable Agent state-machine runs")
@@ -65,6 +68,7 @@ public class AgentRunController {
     public ApiResponse<AgentRunResponse> decide(
             @PathVariable UUID runId,
             @RequestBody AgentApprovalRequest request) {
+        // API 使用 APPROVE/REJECT，领域层使用 APPROVED/REJECTED；在边界处完成协议转换。
         AgentApprovalStatus decision = request.decision() == null
                 ? null
                 : request.decision() == AgentApprovalDecision.APPROVE

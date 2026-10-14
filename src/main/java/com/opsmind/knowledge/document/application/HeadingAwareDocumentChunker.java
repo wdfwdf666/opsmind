@@ -16,6 +16,11 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * 按 Markdown 标题层级切分文档，并产生“父块 + 子块”。
+ * <p>子块较短，适合向量检索定位；父块较长，命中子块后用于给模型提供更完整的语境。
+ * 本类没有数据库和网络依赖，因此是一个容易单元测试的纯算法组件。</p>
+ */
 @Component
 public class HeadingAwareDocumentChunker {
 
@@ -29,12 +34,14 @@ public class HeadingAwareDocumentChunker {
     }
 
     public List<DocumentChunk> chunk(UUID documentId, String documentTitle, String text, Instant createdAt) {
+        // 第一步先按标题解析章节，保留“文档 > 一级标题 > 二级标题”路径。
         List<Section> sections = parseSections(documentTitle, text);
         List<DocumentChunk> chunks = new ArrayList<>();
         int parentOrdinal = 0;
         int childOrdinal = 0;
 
         for (Section section : sections) {
+            // 父块不重叠，控制给大模型的上下文大小。
             for (String parentText : split(section.text(), properties.parentMaxCharacters(), 0)) {
                 String parentHash = sha256(parentText);
                 UUID parentId = deterministicId(documentId, ChunkType.PARENT, parentOrdinal, parentHash);
@@ -42,6 +49,7 @@ public class HeadingAwareDocumentChunker {
                         parentId, documentId, null, ChunkType.PARENT, parentOrdinal++, section.headingPath(),
                         parentText, parentHash, createdAt));
 
+                // 子块保留少量重叠，减少答案恰好跨越切分边界时的信息丢失。
                 for (String childText : split(
                         parentText, properties.childMaxCharacters(), properties.childOverlapCharacters())) {
                     String childHash = sha256(childText);
@@ -135,6 +143,7 @@ public class HeadingAwareDocumentChunker {
     }
 
     private int preferredBreak(String text, int start, int proposedEnd) {
+        // 优先级：段落边界 > 换行 > 空格 > 硬切，尽量保持自然语义完整。
         int minimumBreak = start + (proposedEnd - start) / 2;
         int paragraphBreak = text.lastIndexOf("\n\n", proposedEnd);
         if (paragraphBreak >= minimumBreak) {
@@ -164,6 +173,7 @@ public class HeadingAwareDocumentChunker {
     }
 
     private UUID deterministicId(UUID documentId, ChunkType type, int ordinal, String contentHash) {
+        // 使用稳定输入生成稳定 UUID：内容未变时重建仍得到相同 ID，便于缓存和排查。
         String key = documentId + ":" + type + ":" + ordinal + ":" + contentHash;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }

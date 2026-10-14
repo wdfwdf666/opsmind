@@ -13,6 +13,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 三种检索策略的 HTTP 入口：向量检索、混合检索、混合检索后重排。
+ * <p>把三种接口并列保留，方便学习、调试和离线评测比较效果。</p>
+ */
 @RestController
 @RequestMapping("/api/v1/search")
 @Tag(name = "Knowledge Search", description = "Search indexed child chunks and expand parent context")
@@ -42,6 +46,7 @@ public class SemanticSearchController {
                     responseCode = "400", description = "Invalid query or topK", content = @Content)
     })
     public ApiResponse<SemanticSearchResponse> search(@RequestBody SemanticSearchRequest request) {
+        // Controller 不实现检索算法，只把请求交给对应 Service 并转换响应。
         return ApiResponse.success(SemanticSearchResponse.from(
                 searchService.search(request.query(), request.topK(), request.documentId())));
     }

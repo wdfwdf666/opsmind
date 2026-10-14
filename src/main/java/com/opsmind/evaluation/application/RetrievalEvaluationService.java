@@ -21,6 +21,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
+/**
+ * 检索离线评测服务。
+ * <p>对固定问题集运行 VECTOR/HYBRID/RERANKED，计算 Recall@K、MRR@K、HitRate@K
+ * 与延迟分位数，用客观指标判断一次算法修改是否真的提升效果。</p>
+ */
 @Service
 public class RetrievalEvaluationService {
 
@@ -41,6 +46,7 @@ public class RetrievalEvaluationService {
         this(datasetLoader, searchService, hybridSearchService, rerankedSearchService, System::nanoTime);
     }
 
+    // 测试可传入假的 nanoTime，消除真实机器速度波动对断言的影响。
     RetrievalEvaluationService(
             RetrievalEvaluationDatasetLoader datasetLoader,
             SemanticSearchService searchService,
@@ -60,6 +66,7 @@ public class RetrievalEvaluationService {
         int maxK = dataset.cutoffs().stream().mapToInt(Integer::intValue).max().orElseThrow();
         List<RetrievalEvaluationCaseResult> caseResults = new ArrayList<>(dataset.cases().size());
         String model = null;
+        // 每条 case 都有问题和期望标题路径，实际命中结果会保留到报告中便于逐条排错。
         for (RetrievalEvaluationCase evaluationCase : dataset.cases()) {
             long startedAt = nanoTime.getAsLong();
             SemanticSearchResult searchResult = search(strategy, evaluationCase.query(), maxK, documentId);
@@ -103,6 +110,7 @@ public class RetrievalEvaluationService {
     }
 
     private RetrievalMetricAtK metricAtK(List<RetrievalEvaluationCaseResult> cases, int k) {
+        // Recall 衡量相关结果找回多少；MRR 重视第一个相关结果的位置；HitRate 衡量是否至少命中一个。
         double recall = cases.stream().mapToDouble(result -> recallAtK(result, k)).average().orElse(0);
         double mrr = cases.stream().mapToDouble(result -> reciprocalRankAtK(result, k)).average().orElse(0);
         double hitRate = cases.stream().filter(result -> isHitAtK(result, k)).count() / (double) cases.size();

@@ -29,6 +29,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+/**
+ * Agent 的核心状态机和用例编排器。
+ * <p>一次运行会经过：接收请求 → Planner 路由 → 调用只读知识工具 → 返回答案，
+ * 或生成工单草稿 → 等待人工审批 → 创建工单。每一步都写入审计表。</p>
+ */
 @Service
 public class AgentRunService {
 
@@ -85,12 +90,14 @@ public class AgentRunService {
         return start(rawQuery, documentId, null);
     }
 
+    /** taskType 为空时交给 Planner 判断，非空时尊重调用方显式选择。 */
     public AgentRunView start(String rawQuery, UUID documentId, AgentTaskType requestedTaskType) {
         String query = validateQuery(rawQuery);
         AgentPlan plan = requestedTaskType == null ? planner.plan(query) : AgentPlan.explicit(requestedTaskType);
         AgentTaskType taskType = plan.taskType();
         UUID runId = idSupplier.get();
         Instant now = clock.instant();
+        // 先落库再执行工具：即使后续失败，也能通过 runId 查询失败位置和原因。
         auditRepository.create(new AgentRun(
                 runId, query, documentId, taskType, plan.source(), plan.provider(), plan.model(), plan.reason(),
                 AgentRunStatus.RUNNING,
@@ -102,12 +109,14 @@ public class AgentRunService {
                         "taskType", taskType.name(),
                         "taskTypeSource", plan.source().name()));
 
+        // Java switch 表达式进入两条受控流程，不让模型任意拼装工具调用。
         return switch (taskType) {
             case KNOWLEDGE_QA -> startKnowledgeRun(runId, query, documentId, plan);
             case CREATE_TICKET -> startTicketRun(runId, query, documentId, plan);
         };
     }
 
+    // @Transactional 表示审批、创建工单和状态更新共享数据库事务；异常时整体回滚。
     @Transactional
     public AgentRunView decide(UUID runId, AgentApprovalStatus decision, String rawReason) {
         if (decision == null || decision == AgentApprovalStatus.PENDING) {
@@ -124,6 +133,7 @@ public class AgentRunService {
                     "Agent run does not contain a pending write tool",
                     HttpStatus.CONFLICT);
         }
+        // 同一决定重复提交直接返回原结果，避免网络重试创建两张工单（幂等）。
         if (isSameCompletedDecision(current, decision)) {
             return current;
         }
@@ -136,6 +146,7 @@ public class AgentRunService {
         }
 
         Instant decidedAt = clock.instant();
+        // 条件更新只有一个并发请求能成功，其他请求得到冲突而不会重复执行写工具。
         if (!auditRepository.decideApproval(runId, decision, reason, decidedAt)) {
             throw new AgentException(
                     "AGENT_APPROVAL_CONCURRENT_UPDATE",
@@ -153,6 +164,7 @@ public class AgentRunService {
         toolPolicy.requireApprovedExecutable(createTicketTool);
         append(runId, 5, AgentStepType.APPROVED, createTicketTool, true,
                 Map.of("reasonProvided", reason != null));
+        // 只有 APPROVED 分支且策略校验通过后，真正的写工具才会运行。
         SupportTicket ticket = createTicketTool.execute(new CreateTicketInput(runId, current.approval().draft()));
         append(runId, 6, AgentStepType.TOOL_CALL, createTicketTool, true,
                 Map.of("ticketId", ticket.id(), "ticketStatus", ticket.status().name()));
@@ -194,6 +206,7 @@ public class AgentRunService {
                         "plannerProvider", plan.provider(),
                         "plannerModel", plan.model(),
                         "plannerReason", plan.reason()));
+        // 创建工单前仍先检索知识，生成带建议的草稿；此时还没有任何外部写操作。
         RagAnswerResult evidence = executeKnowledge(runId, query, documentId, 3);
         TicketDraft draft = ticketDraft(query, evidence);
         Instant requestedAt = clock.instant();
@@ -255,6 +268,7 @@ public class AgentRunService {
             AgentTool<?, ?> tool,
             boolean success,
             Map<String, ?> detail) {
+        // 所有轨迹统一从这里追加，sequence 保证 UI 按真实执行顺序展示。
         auditRepository.appendStep(step(runId, sequence, type, tool, success, detail));
     }
 

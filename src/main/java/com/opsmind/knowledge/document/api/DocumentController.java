@@ -28,17 +28,30 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
+/**
+ * 文档管理接口：负责上传、解析、查看、分块和向量化。
+ * <p>Controller 是 HTTP 层，不直接写 SQL，也不实现分块算法。它只做三件事：
+ * 接收请求参数、调用应用服务、把结果包装成响应。这样的分层让业务逻辑可以脱离浏览器单独测试。</p>
+ */
+// 告诉 Spring MVC：这个类的方法用于处理 HTTP 请求，返回对象会由 Jackson 转成 JSON。
 @RestController
+// 类级路径前缀；下面所有方法的地址都以 /api/v1/documents 开头。
 @RequestMapping("/api/v1/documents")
+// OpenAPI/Swagger 文档分组注解，只影响接口页面，不改变运行逻辑。
 @Tag(name = "Knowledge Documents", description = "Upload knowledge documents and inspect ingestion status")
 public class DocumentController {
 
+    // final 表示依赖在构造后不再更换；这些对象由 Spring 容器创建并注入。
     private final DocumentService documentService;
     private final DocumentIngestionService ingestionService;
     private final DocumentCatalogService catalogService;
     private final DocumentChunkingService chunkingService;
     private final DocumentEmbeddingService embeddingService;
 
+    /**
+     * 构造器注入。只有一个构造器时不必写 {@code @Autowired}，Spring 会自动匹配参数类型。
+     * 相比字段注入，构造器注入能保证对象创建后依赖完整，也更便于单元测试传入替身对象。
+     */
     public DocumentController(
             DocumentService documentService,
             DocumentIngestionService ingestionService,
@@ -52,6 +65,7 @@ public class DocumentController {
         this.embeddingService = embeddingService;
     }
 
+    // @PostMapping 把 HTTP POST 映射到该方法；consumes 声明只接收表单文件上传格式。
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
             summary = "Upload a knowledge document",
@@ -65,13 +79,16 @@ public class DocumentController {
     })
     public ResponseEntity<com.opsmind.common.api.ApiResponse<DocumentResponse>> upload(
             @Parameter(description = "Knowledge document to upload", required = true)
+            // @RequestPart("file") 从 multipart 表单中读取名为 file 的部分。
             @RequestPart("file") MultipartFile file) {
         DocumentUploadResult result = documentService.upload(file);
+        // 新文档使用 201 Created；内容已存在时返回 200，体现去重结果。
         HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.CREATED;
         return ResponseEntity.status(status)
                 .body(com.opsmind.common.api.ApiResponse.success(DocumentResponse.from(result)));
     }
 
+    // 没有子路径，因此对应 GET /api/v1/documents。
     @GetMapping
     @Operation(
             summary = "List knowledge documents",
@@ -82,6 +99,7 @@ public class DocumentController {
     })
     public com.opsmind.common.api.ApiResponse<DocumentPageResponse> list(
             @Parameter(description = "Zero-based page index", example = "0")
+            // @RequestParam 读取 URL 查询参数；未传时由 defaultValue 提供默认值。
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Items per page, between 1 and 100", example = "20")
             @RequestParam(defaultValue = "20") int size) {
@@ -89,6 +107,7 @@ public class DocumentController {
                 DocumentPageResponse.from(catalogService.list(page, size)));
     }
 
+    // {documentId} 是路径变量，例如 /api/v1/documents/550e8400-e29b-41d4-a716-446655440000。
     @GetMapping("/{documentId}")
     @Operation(summary = "Get document ingestion status")
     @ApiResponses({
@@ -98,10 +117,12 @@ public class DocumentController {
     public com.opsmind.common.api.ApiResponse<DocumentResponse> find(
             @Parameter(description = "Document identifier", required = true,
                     schema = @Schema(format = "uuid"))
+            // Spring 会把路径中的字符串转换成 UUID；格式错误会在进入方法前返回 400。
             @PathVariable UUID documentId) {
         return com.opsmind.common.api.ApiResponse.success(DocumentResponse.from(documentService.find(documentId)));
     }
 
+    // 使用 POST 是因为解析会修改数据库状态和内容，不是纯查询。
     @PostMapping("/{documentId}/process")
     @Operation(
             summary = "Parse and clean an uploaded document",
@@ -134,6 +155,7 @@ public class DocumentController {
                 DocumentContentResponse.from(ingestionService.findContent(documentId)));
     }
 
+    // rebuild 表明这是一次可重复执行的重建操作，会原子替换旧分块。
     @PostMapping("/{documentId}/chunks/rebuild")
     @Operation(
             summary = "Rebuild parent and child chunks",
@@ -161,6 +183,7 @@ public class DocumentController {
     public com.opsmind.common.api.ApiResponse<DocumentChunkPageResponse> chunks(
             @Parameter(description = "Document identifier", required = true, schema = @Schema(format = "uuid"))
             @PathVariable UUID documentId,
+            // Spring 会按枚举名称把 CHILD/PARENT 转为 ChunkType。
             @RequestParam(defaultValue = "CHILD") ChunkType type,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
@@ -168,6 +191,7 @@ public class DocumentController {
                 DocumentChunkPageResponse.from(chunkingService.list(documentId, type, page, size)));
     }
 
+    // 只有 CHILD 分块需要向量化：小块利于精准召回，回答时再回溯父块获取完整上下文。
     @PostMapping("/{documentId}/embeddings/rebuild")
     @Operation(
             summary = "Rebuild child chunk embeddings",

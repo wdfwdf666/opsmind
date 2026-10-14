@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * RAG 问答入口。默认在全部文档中自动检索；只有调用方传入 documentId 时才限定单文档。
+ */
 @RestController
 @RequestMapping("/api/v1/rag")
 @Tag(name = "RAG Answers", description = "Generate grounded answers from reranked internal evidence")
@@ -43,7 +46,9 @@ public class RagAnswerController {
             content = @Content(examples = @ExampleObject(
                     name = "Automatic document selection",
                     value = "{\"query\":\"数据库连接池告警应该检查什么？\",\"topK\":5}")))
-    public ApiResponse<RagAnswerResponse> answer(@RequestBody RagAnswerRequest request) {
+    public ApiResponse<RagAnswerResponse> answer(
+            // @RequestBody 让 Jackson 把请求 JSON 反序列化为 RagAnswerRequest record。
+            @RequestBody RagAnswerRequest request) {
         return ApiResponse.success(RagAnswerResponse.from(
                 answerService.answer(request.query(), request.topK(), request.documentId())));
     }

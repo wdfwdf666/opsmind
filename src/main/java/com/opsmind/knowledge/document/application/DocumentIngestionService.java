@@ -20,10 +20,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * 文档解析流水线：领取任务 → 读取原文件 → Tika 提取文本 → 清洗 → 保存 → 更新状态。
+ * <p>“任务表 + 租约”让失败任务可以重试，并避免多个请求同时处理同一文档。</p>
+ */
 @Service
 public class DocumentIngestionService {
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 2000;
+    // RUNNING 超过 5 分钟可被重新领取，用于处理进程崩溃后遗留的“假运行”任务。
     private static final Duration PROCESSING_LEASE = Duration.ofMinutes(5);
 
     private final DocumentStorage storage;
@@ -64,11 +69,13 @@ public class DocumentIngestionService {
 
     public DocumentIngestionResult process(UUID documentId) {
         KnowledgeDocument document = requireDocument(documentId);
+        // getOrCreate 使接口具有幂等性：重复调用继续使用同一任务，而不是无限创建任务。
         IngestionTask task = taskRepository.getOrCreate(documentId, clock.instant());
         if (task.status() == IngestionTaskStatus.SUCCEEDED) {
             return completedResult(documentId);
         }
         Instant startedAt = clock.instant();
+        // tryMarkRunning 在 SQL 层做原子状态更新；返回 false 表示任务已被其他线程持有。
         if (!taskRepository.tryMarkRunning(documentId, startedAt, startedAt.minus(PROCESSING_LEASE))) {
             throw new DocumentException(
                     "DOCUMENT_PROCESSING_IN_PROGRESS",
@@ -88,6 +95,7 @@ public class DocumentIngestionService {
             }
 
             Instant completedAt = clock.instant();
+            // 先保存内容，再把文档和任务标记成功，避免状态显示 READY 却查不到内容。
             contentRepository.save(new DocumentContent(
                     documentId,
                     normalizeTitle(parsed.title()),
@@ -99,6 +107,7 @@ public class DocumentIngestionService {
             taskRepository.markSucceeded(documentId, completedAt);
             return completedResult(documentId);
         } catch (RuntimeException exception) {
+            // 统一记录失败状态，后续调用 process 可以看到原因并发起重试。
             markFailed(documentId, exception);
             if (exception instanceof DocumentException documentException) {
                 throw documentException;

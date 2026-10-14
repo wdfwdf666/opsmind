@@ -15,6 +15,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * “上传文档”用例的应用服务。
+ * <p>它编排校验、内容去重、文件保存、元数据入库和任务创建，但不关心这些动作的具体技术实现。</p>
+ */
+// @Service 是 @Component 的业务语义版本；启动时 Spring 会创建单例对象并允许其他类注入它。
 @Service
 public class DocumentService {
 
@@ -24,6 +29,7 @@ public class DocumentService {
     private final IngestionTaskRepository taskRepository;
     private final Clock clock;
 
+    // @Autowired 明确告诉 Spring 使用这个面向生产的构造器；Clock 使用系统 UTC 时间。
     @Autowired
     public DocumentService(
             DocumentValidationService validationService,
@@ -33,6 +39,7 @@ public class DocumentService {
         this(validationService, storage, documentRepository, taskRepository, Clock.systemUTC());
     }
 
+    // 包级可见构造器供测试传入固定 Clock，使时间相关断言稳定、可重复。
     DocumentService(
             DocumentValidationService validationService,
             DocumentStorage storage,
@@ -47,18 +54,22 @@ public class DocumentService {
     }
 
     public DocumentUploadResult upload(MultipartFile file) {
+        // 先做大小、扩展名、真实文件签名和 SHA-256 计算，非法文件不会进入存储层。
         ValidatedDocument validated = validationService.validate(file);
+        // 相同内容具有相同 SHA-256；先查重可以节省磁盘、解析和向量模型调用成本。
         var existing = documentRepository.findBySha256(validated.sha256());
         if (existing.isPresent()) {
             KnowledgeDocument document = existing.get();
             return new DocumentUploadResult(document, taskFor(document.id()), true);
         }
 
+        // 原文件写入磁盘后，数据库只保存 storageKey，而不是把大文件塞进表中。
         String storageKey = storage.store(validated);
         Instant now = clock.instant();
         KnowledgeDocument candidate = new KnowledgeDocument(
                 UUID.randomUUID(), validated.filename(), validated.mediaType(), validated.size(), validated.sha256(),
                 storageKey, DocumentStatus.UPLOADED, now);
+        // saveIfAbsent 由数据库唯一约束兜住并发上传：两个请求同时查不到时仍只会保存一份。
         DocumentRepository.SaveResult saved = documentRepository.saveIfAbsent(candidate);
         return new DocumentUploadResult(saved.document(), taskFor(saved.document().id()), !saved.created());
     }

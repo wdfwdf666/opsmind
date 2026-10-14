@@ -19,7 +19,12 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.util.List;
 
+/**
+ * 调用 Qwen OpenAI 兼容 Chat Completions 接口的适配器。
+ * <p>application 层只依赖 AnswerGenerationProvider 接口，因此未来换模型时只需新增实现。</p>
+ */
 @Component
+// 当 opsmind.generation.provider=qwen（或配置缺省）时才注册本实现；可用配置切换本地实现。
 @ConditionalOnProperty(prefix = "opsmind.generation", name = "provider", havingValue = "qwen", matchIfMissing = true)
 public class QwenChatAnswerGenerationProvider implements AnswerGenerationProvider {
 
@@ -55,6 +60,7 @@ public class QwenChatAnswerGenerationProvider implements AnswerGenerationProvide
     @Override
     public GeneratedAnswer generate(String query, List<RagEvidence> evidence) {
         validateConfiguration();
+        // system 消息定义不可突破的回答规则，user 消息只携带问题和检索证据。
         QwenChatRequest request = new QwenChatRequest(
                 model(),
                 List.of(
@@ -62,6 +68,7 @@ public class QwenChatAnswerGenerationProvider implements AnswerGenerationProvide
                         new QwenMessage("user", userPrompt(query, evidence))),
                 properties.temperature(), properties.maxOutputTokens(), false);
         try {
+            // RestClient 是 Spring 的同步 HTTP 客户端；retrieve 发送请求并反序列化响应 JSON。
             QwenChatResponse response = restClient.post()
                     .uri(endpoint())
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
@@ -70,11 +77,13 @@ public class QwenChatAnswerGenerationProvider implements AnswerGenerationProvide
                     .body(QwenChatResponse.class);
             return answer(response);
         } catch (RestClientResponseException exception) {
+            // 对方返回了 4xx/5xx，说明网络通但供应商拒绝或处理失败。
             throw new DocumentException(
                     "ANSWER_PROVIDER_ERROR",
                     "Qwen chat request failed with HTTP " + exception.getStatusCode().value(),
                     HttpStatus.BAD_GATEWAY);
         } catch (RestClientException exception) {
+            // 连接超时、DNS、断线等没有正常 HTTP 响应的故障归为 unavailable。
             throw new DocumentException(
                     "ANSWER_PROVIDER_UNAVAILABLE",
                     "Qwen chat service is unavailable",
@@ -136,6 +145,7 @@ public class QwenChatAnswerGenerationProvider implements AnswerGenerationProvide
             String passage) {
     }
 
+    // 以下 record 只描述第三方 JSON 协议，不属于本项目领域模型。
     record QwenChatRequest(
             String model,
             List<QwenMessage> messages,

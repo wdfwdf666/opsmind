@@ -13,6 +13,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * 混合检索服务：合并向量语义检索和 BM25 关键词检索。
+ * <p>向量检索擅长“意思相近”，BM25 擅长错误码、产品名等精确词；RRF（倒数排名融合）
+ * 只使用各自名次，不要求两种分数处于相同量纲。</p>
+ */
 @Service
 public class HybridSearchService {
 
@@ -40,6 +45,7 @@ public class HybridSearchService {
                     "topK must be between 1 and " + embeddingProperties.maxTopK(),
                     HttpStatus.BAD_REQUEST);
         }
+        // 先多召回一些候选，再融合并截取 topK；候选太少会让后续重排没有选择空间。
         int candidateLimit = Math.min(
                 embeddingProperties.maxTopK(),
                 Math.max(hybridProperties.minimumCandidates(), topK * hybridProperties.candidateMultiplier()));
@@ -68,6 +74,7 @@ public class HybridSearchService {
     private void addRanking(Map<UUID, FusedHit> fused, List<SemanticSearchHit> ranking) {
         for (int index = 0; index < ranking.size(); index++) {
             SemanticSearchHit hit = ranking.get(index);
+            // RRF 公式：1 / (k + rank)。同一块被两路同时命中时分数相加，会自然排到前面。
             double reciprocalRank = 1.0 / (hybridProperties.rrfK() + index + 1);
             fused.compute(hit.chunkId(), (chunkId, existing) -> existing == null
                     ? new FusedHit(hit, reciprocalRank)

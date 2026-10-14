@@ -18,6 +18,11 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * RAG 核心编排服务。
+ * <p>RAG 的关键不是“直接问模型”，而是先从企业知识库找到证据，再让模型严格依据证据作答，
+ * 最后校验引用编号。这样可以降低幻觉，并让用户追溯答案来源。</p>
+ */
 @Service
 public class RagAnswerService {
 
@@ -41,8 +46,10 @@ public class RagAnswerService {
 
     public RagAnswerResult answer(String query, Integer requestedTopK, UUID documentId) {
         int topK = requestedTopK == null ? properties.evidenceTopK() : requestedTopK;
+        // documentId 为 null 时仓储不会增加文档过滤条件，即在整个知识库中自动选择相关内容。
         SemanticSearchResult searchResult = searchService.search(query, topK, documentId);
         Double topEvidenceScore = searchResult.hits().isEmpty() ? null : searchResult.hits().getFirst().score();
+        // 没有证据或最高分过低时直接返回确定性结果，不调用大模型，节省成本并避免编造。
         if (topEvidenceScore == null) {
             return refusal(searchResult, documentId, RagRefusalReason.NO_EVIDENCE, null, NO_EVIDENCE_ANSWER);
         }
@@ -56,6 +63,7 @@ public class RagAnswerService {
             return refusal(searchResult, documentId, RagRefusalReason.NO_EVIDENCE, topEvidenceScore, NO_EVIDENCE_ANSWER);
         }
 
+        // 只有证据门槛通过后才请求生成模型。
         GeneratedAnswer generated = generationProvider.generate(searchResult.query(), evidence);
         String answer = validateAnswer(generated);
         List<RagCitation> citations = referencedCitations(answer, evidence);
@@ -82,12 +90,14 @@ public class RagAnswerService {
         int remainingCharacters = properties.maxContextCharacters();
         for (SemanticSearchHit hit : hits) {
             UUID contextId = hit.parentId() == null ? hit.chunkId() : hit.parentId();
+            // 多个子块可能属于同一父块；父块去重防止上下文重复浪费 token。
             if (!seenParents.add(contextId) || remainingCharacters <= 0) {
                 continue;
             }
             String originalPassage = hit.parentText() == null || hit.parentText().isBlank()
                     ? hit.childText()
                     : hit.parentText();
+            // 用字符预算限制提示词体积，防止超过模型上下文窗口并控制费用。
             String passage = originalPassage.length() <= remainingCharacters
                     ? originalPassage
                     : originalPassage.substring(0, remainingCharacters);
@@ -115,6 +125,7 @@ public class RagAnswerService {
         evidence.forEach(item -> bySourceId.put(item.sourceId(), item));
         LinkedHashSet<String> referenced = new LinkedHashSet<>();
         Matcher matcher = CITATION_PATTERN.matcher(answer);
+        // 只接受本次提示词真实提供过的 [S1]、[S2]，模型虚构来源会触发 502。
         while (matcher.find()) {
             String sourceId = "S" + matcher.group(1);
             if (!bySourceId.containsKey(sourceId)) {
