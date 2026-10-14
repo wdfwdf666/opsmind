@@ -2,6 +2,8 @@
 
 > 一个面向企业内部 IT 支持、研发运维和制度问答场景的生产级 RAG Agent。它不仅回答“怎么做”，还会根据权限查询工单、检索历史故障、生成处置计划，并在人工确认后调用工具执行低风险操作。
 
+第一次阅读 Spring Boot、RAG 或 Agent 项目时，建议先看面向 Java 初学者的完整说明：[`docs/OpsMind项目完整学习指南.md`](docs/OpsMind项目完整学习指南.md)。
+
 ## 当前实现状态
 
 当前完成 **第 24 步：Prometheus、Grafana 与 Alertmanager 监控闭环（FEAT-023 / VERIFY-007）**。

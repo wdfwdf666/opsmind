@@ -2,6 +2,17 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [DOC-001] 增加面向 Java 初学者的完整项目学习指南
+
+- **日期**：2026-10-14
+- **类型**：文档 / 架构 / Spring Boot / 学习指南
+- **状态**：已完成
+- **关联需求或问题**：项目已覆盖文档入库、RAG、Agent、评测和监控，但 README 更偏向运行状态和接口速查；只有少量 Java 基础、尚不熟悉 Spring Boot 的读者难以理解一次请求怎样跨越各层，以及代码为何使用依赖注入、接口、事务和条件 Bean。
+- **问题**：现有信息分散在源码、README、迁移脚本和验证报告中，缺少从 Java/Spring Boot 基础出发的统一学习路径，也缺少对企业化演进方向的系统说明。
+- **修改内容**：新增 `docs/OpsMind项目完整学习指南.md`，从 Java、Spring、Spring Boot 的关系开始，说明运行架构、Maven、分层、常用注解、文档入库、Parent-Child 分块、Embedding、混合检索、Rerank、RAG 门禁与引用、Planner、Tool Policy、审批状态机、数据库、Flyway、评测、监控、测试、排障、企业演进和面试表达；README 增加入口链接。
+- **修改效果**：读者可以先建立整体链路，再按 Controller → Service → Repository → Infrastructure 的顺序阅读代码，并把当前原型与企业生产实现的差距对应起来。
+- **影响文件**：完整学习指南、README、CHANGELOG。
+
 ## [FEAT-023] 建立 Prometheus、Grafana 与 Alertmanager 监控闭环
 
 - **日期**：2026-10-14
