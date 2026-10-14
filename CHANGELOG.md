@@ -2,6 +2,23 @@
 
 本文件记录项目中所有可交付的功能实现、缺陷修复、性能优化、架构调整和重要配置变更。记录采用倒序排列，最新变更置顶。
 
+## [FEAT-023] 建立 Prometheus、Grafana 与 Alertmanager 监控闭环
+
+- **日期**：2026-10-14
+- **类型**：增强 / 可观测性 / 监控 / 告警
+- **状态**：已完成；自动化测试、配置检查与真实故障注入通过
+- **关联需求或问题**：继续完善项目第 24 步；FEAT-022 已发布 Planner Micrometer 指标，但只能逐个访问 Actuator 查看，没有时序存储、统一看板、告警计算、聚合与静默入口。
+- **问题**：运行人员无法持续观察请求速率、Qwen/降级占比、P95、重试和熔断状态；应用离线、持续降级与高延迟也不会主动进入告警状态。仅有瞬时 Actuator 数值不足以定位时间窗口内的异常。
+- **修改内容**：引入 `micrometer-registry-prometheus`，显式启用 Prometheus Exporter 并开放 `/actuator/prometheus`；为 Planner Timer 启用直方图和 100 ms、500 ms、1 s、2 s、5 s SLO 桶。Compose 增加 Prometheus 3.15.0、Grafana 12.4.12、Alertmanager 0.30.0、7 天保留期、项目内绑定挂载和 `host-gateway`。新增自动 Provisioning 的 Prometheus 数据源、固定 UID `opsmind-agent` Dashboard、Alertmanager `local-ui` 接收器和四条告警规则。新增端点契约测试、Grafana 环境变量模板、README 与 VERIFY-007 报告。
+- **实现中发现的问题**：Spring Boot 4 的 MockMvc 自动配置注解位于 `org.springframework.boot.webmvc.test.autoconfigure`，首次沿用旧包名导致测试编译失败；测试资源的 `application.yml` 会覆盖主配置，首次只改主配置导致端点测试返回 404。补齐测试配置后又发现 Spring Boot 测试默认关闭 Metrics Exporter，因此在生产和测试配置中显式设置 `management.prometheus.metrics.export.enabled=true`。另外，镜像默认 Entrypoint 已是 Prometheus/Alertmanager 主程序，校验命令必须使用 `--entrypoint promtool` / `--entrypoint amtool`，而不是把工具名作为普通参数。
+- **影响文件**：Maven 依赖、生产/测试 Actuator 配置、Compose、Prometheus/Alertmanager/Grafana Provisioning、Dashboard JSON、`.env.example`、端点测试、README、CHANGELOG、VERIFY-007 报告。
+- **验证方式**：执行 `docker compose config`、`promtool check config/rules`、`amtool check-config`、完整 `.\mvnw.cmd test` 和 `.\mvnw.cmd package -DskipTests`。保留用户 IntelliJ 的 8080 进程不动，在 18080 启动隔离应用，并用临时验证配置让 Prometheus 抓取该端口；将 Qwen Planner 指向未监听端口，失败阈值设为 2，发起两批各 12 个请求，再启动本地兼容响应模拟器验证恢复。
+- **验证结果**：92 个测试通过，0 失败，0 错误；打包成功。Prometheus 配置和 4 条规则、Alertmanager 配置均通过官方工具检查。真实 Target 为 `UP`；Grafana 12.4.12 数据源健康并成功加载 `opsmind-agent` Dashboard；Alertmanager Ready 返回 200。首批 12 请求全部 200，记录 2 次远程 I/O 失败、1 次熔断打开、10 次熔断旁路和 12 次降级；第二批在抓取窗口内产生约 12 次请求/降级增量。`OpsMindPlannerCircuitOpen` 与 `OpsMindPlannerFallbackRateHigh` 均进入 firing 并送达 Alertmanager；恢复模拟器返回有效 Planner JSON 后，Provider 恢复为 `qwen`、熔断 Gauge 从 1 变为 0，熔断告警从活动列表消失。高降级率按 5 分钟滚动窗口保留，等待窗口衰减后自然恢复。
+- **修改前指标**：0 个 Prometheus 抓取目标；0 个 Grafana Dashboard；0 条告警规则；91 个测试。
+- **修改后指标**：1 个 Prometheus Target；1 个 7 面板 Dashboard；4 条告警规则；3 个本地监控入口；92 个测试。
+- **修改效果**：Planner 的单次指标升级为可查询的时序数据；持续故障能自动触发规则、进入 Alertmanager 聚合/静默流程，并可在上游恢复后清除；本地演示环境通过一次 Compose 启动即可复现完整监控链路。
+- **风险与后续**：当前 Alertmanager 只使用本地 UI 接收器，阈值来自本机故障注入，Prometheus 也是单实例绑定挂载。生产环境需要保护 Actuator 和监控端口、修改 Grafana 密码、接入真实通知渠道，并根据流量、错误预算和压测结果重新校准阈值。
+
 ## [FEAT-022] 增加 Planner 指数退避、熔断与可观测指标
 
 - **日期**：2026-10-13

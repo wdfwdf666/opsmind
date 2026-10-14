@@ -87,6 +87,10 @@ server:
     include-stacktrace: never
 
 management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
   endpoints:
     web:
       exposure:
@@ -99,6 +103,12 @@ management:
   info:
     env:
       enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        opsmind.agent.planner.duration: true
+      slo:
+        opsmind.agent.planner.duration: 100ms,500ms,1s,2s,5s
 
 info:
   app:

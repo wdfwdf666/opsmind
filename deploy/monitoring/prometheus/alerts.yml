@@ -1,0 +1,56 @@
+groups:
+  - name: opsmind-agent
+    interval: 5s
+    rules:
+      - alert: OpsMindApplicationDown
+        expr: up{job="opsmind"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: OpsMind application metrics target is down
+          description: Prometheus has failed to scrape the OpsMind application for one minute.
+
+      - alert: OpsMindPlannerCircuitOpen
+        expr: opsmind_agent_planner_circuit_state{job="opsmind"} == 1
+        for: 30s
+        labels:
+          severity: critical
+          component: planner
+        annotations:
+          summary: Qwen Planner circuit breaker is open
+          description: Remote Planner calls are being bypassed and routed to the local fallback.
+
+      - alert: OpsMindPlannerFallbackRateHigh
+        expr: |
+          (
+            sum(rate(opsmind_agent_planner_fallbacks_total{job="opsmind"}[5m]))
+            /
+            clamp_min(sum(rate(opsmind_agent_planner_requests_total{job="opsmind"}[5m])), 0.001)
+          ) > 0.20
+          and
+          sum(increase(opsmind_agent_planner_requests_total{job="opsmind"}[5m])) >= 10
+        for: 2m
+        labels:
+          severity: warning
+          component: planner
+        annotations:
+          summary: Planner fallback rate is above 20 percent
+          description: At least 10 Planner requests were observed and more than 20 percent used local fallback.
+
+      - alert: OpsMindPlannerP95LatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(opsmind_agent_planner_duration_seconds_bucket{job="opsmind"}[5m]))
+          ) > 2
+          and
+          sum(increase(opsmind_agent_planner_duration_seconds_count{job="opsmind"}[5m])) >= 10
+        for: 5m
+        labels:
+          severity: warning
+          component: planner
+        annotations:
+          summary: Planner P95 latency is above two seconds
+          description: Planner P95 latency has exceeded two seconds with at least 10 requests in five minutes.

@@ -68,3 +68,19 @@ opsmind:
     max-output-tokens: 1200
     temperature: 0.1
 
+management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        opsmind.agent.planner.duration: true
+      slo:
+        opsmind.agent.planner.duration: 100ms,500ms,1s,2s,5s
+

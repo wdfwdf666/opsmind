@@ -1,0 +1,96 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(rate(opsmind_agent_planner_requests_total{job=\"opsmind\"}[5m]))", "legendFormat": "requests/s", "refId": "A"}],
+      "title": "Planner Request Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.2}]}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(rate(opsmind_agent_planner_fallbacks_total{job=\"opsmind\"}[5m])) / clamp_min(sum(rate(opsmind_agent_planner_requests_total{job=\"opsmind\"}[5m])), 0.001)", "legendFormat": "fallback ratio", "refId": "A"}],
+      "title": "Planner Fallback Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 2}]}, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(opsmind_agent_planner_duration_seconds_bucket{job=\"opsmind\"}[5m])))", "legendFormat": "P95", "refId": "A"}],
+      "title": "Planner P95 Latency",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"color": "green", "index": 0, "text": "CLOSED"}, "0.5": {"color": "yellow", "index": 1, "text": "HALF_OPEN"}, "1": {"color": "red", "index": 2, "text": "OPEN"}}, "type": "value"}], "max": 1, "min": 0}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 6},
+      "id": 4,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "opsmind_agent_planner_circuit_state{job=\"opsmind\"}", "legendFormat": "circuit", "refId": "A"}],
+      "title": "Circuit State",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 9, "x": 6, "y": 6},
+      "id": 5,
+      "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "sum by (outcome) (rate(opsmind_agent_planner_requests_total{job=\"opsmind\"}[5m]))", "legendFormat": "{{outcome}}", "refId": "A"},
+        {"expr": "sum by (reason) (rate(opsmind_agent_planner_retries_total{job=\"opsmind\"}[5m]))", "legendFormat": "retry: {{reason}}", "refId": "B"}
+      ],
+      "title": "Planner Outcomes and Retries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 9, "x": 15, "y": 6},
+      "id": 6,
+      "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (result) (rate(opsmind_agent_planner_attempts_total{job=\"opsmind\"}[5m]))", "legendFormat": "{{result}}", "refId": "A"}],
+      "title": "Remote Attempt Results",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 14},
+      "id": 7,
+      "options": {"cellHeight": "sm", "showHeader": true},
+      "targets": [{"expr": "ALERTS{alertstate=\"firing\"}", "format": "table", "instant": true, "refId": "A"}],
+      "title": "Firing Alerts",
+      "transformations": [{"id": "labelsToFields", "options": {}}],
+      "type": "table"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": ["opsmind", "agent", "planner"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "OpsMind Agent Observability",
+  "uid": "opsmind-agent",
+  "version": 1,
+  "weekStart": ""
+}
