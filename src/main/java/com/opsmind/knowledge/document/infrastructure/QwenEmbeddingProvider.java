@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.infrastructure;
+package com.opsmind.knowledge.document.infrastructure; // 包作用：基础设施层，实现数据库、文件系统和外部模型调用。
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.opsmind.knowledge.document.application.EmbeddingProvider;
@@ -17,35 +17,35 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-@Component
-@ConditionalOnProperty(prefix = "opsmind.embedding", name = "provider", havingValue = "qwen", matchIfMissing = true)
-public class QwenEmbeddingProvider implements EmbeddingProvider {
+@Component // 注解作用：把普通组件交给 Spring 容器管理。
+@ConditionalOnProperty(prefix = "opsmind.embedding", name = "provider", havingValue = "qwen", matchIfMissing = true) // 注解作用：只有配置值满足条件时才启用当前实现。
+public class QwenEmbeddingProvider implements EmbeddingProvider { // 类型作用：Qwen 适配器，负责请求组装、远程调用和响应校验。
 
     private final EmbeddingProperties properties;
     private final RestClient restClient;
 
-    @Autowired
-    public QwenEmbeddingProvider(EmbeddingProperties properties) {
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
+    public QwenEmbeddingProvider(EmbeddingProperties properties) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(properties, RestClient.builder());
     }
 
-    QwenEmbeddingProvider(EmbeddingProperties properties, RestClient.Builder restClientBuilder) {
+    QwenEmbeddingProvider(EmbeddingProperties properties, RestClient.Builder restClientBuilder) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.properties = properties;
         this.restClient = restClientBuilder.build();
     }
 
-    @Override
-    public String model() {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public String model() { // 方法作用：返回当前实现使用的模型名称，供响应和审计展示。
         return properties.model();
     }
 
-    @Override
-    public int dimension() {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public int dimension() { // 方法作用：完成“dimension”对应的内部步骤，供主流程复用。
         return properties.dimension();
     }
 
-    @Override
-    public List<double[]> embed(List<String> texts) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public List<double[]> embed(List<String> texts) { // 方法作用：完成“embed”对应的内部步骤，供主流程复用。
         if (texts.isEmpty()) {
             return List.of();
         }
@@ -58,7 +58,7 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
         return List.copyOf(result);
     }
 
-    private List<double[]> requestBatch(List<String> texts) {
+    private List<double[]> requestBatch(List<String> texts) { // 方法作用：完成“requestBatch”对应的内部步骤，供主流程复用。
         QwenEmbeddingRequest request = new QwenEmbeddingRequest(
                 model(), texts, dimension(), "float");
         try {
@@ -82,7 +82,7 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
         }
     }
 
-    private List<double[]> vectors(QwenEmbeddingResponse response, int expectedCount) {
+    private List<double[]> vectors(QwenEmbeddingResponse response, int expectedCount) { // 方法作用：完成“vectors”对应的内部步骤，供主流程复用。
         if (response == null || response.data() == null || response.data().size() != expectedCount) {
             throw invalidResponse("unexpected vector count");
         }
@@ -100,7 +100,7 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
         return vectors;
     }
 
-    private void validateConfiguration() {
+    private void validateConfiguration() { // 方法作用：在发起远程调用前检查地址、密钥等必填配置。
         if (properties.baseUrl() == null || properties.baseUrl().isBlank()
                 || properties.apiKey() == null || properties.apiKey().isBlank()) {
             throw new DocumentException(
@@ -110,11 +110,11 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
         }
     }
 
-    private String endpoint() {
+    private String endpoint() { // 方法作用：规范化基础地址并拼出真正调用的远程接口地址。
         return properties.baseUrl().replaceAll("/+$", "") + "/embeddings";
     }
 
-    private DocumentException invalidResponse(String reason) {
+    private DocumentException invalidResponse(String reason) { // 方法作用：完成“invalidResponse”对应的内部步骤，供主流程复用。
         return new DocumentException(
                 "EMBEDDING_PROVIDER_INVALID_RESPONSE",
                 "Qwen embedding returned an invalid response: " + reason,
@@ -122,20 +122,20 @@ public class QwenEmbeddingProvider implements EmbeddingProvider {
     }
 
     record QwenEmbeddingRequest(
-            String model,
-            List<String> input,
-            int dimensions,
-            @JsonProperty("encoding_format") String encodingFormat) {
+            String model /* 字段作用：实际使用的模型名称，用于追踪和审计。 */,
+            List<String> input /* 字段作用：该不可变对象携带的 input 数据。 */,
+            int dimensions /* 字段作用：该不可变对象携带的 dimensions 数据。 */,
+            @JsonProperty("encoding_format") String encodingFormat /* 字段作用：该不可变对象携带的 encodingFormat 数据。 */) { // 类型作用：请求 DTO，规定调用接口时可以提交哪些 JSON 字段。
     }
 
-    record QwenEmbeddingResponse(List<QwenEmbeddingData> data, String model, QwenUsage usage) {
+    record QwenEmbeddingResponse(List<QwenEmbeddingData> data /* 字段作用：该不可变对象携带的 data 数据。 */, String model /* 字段作用：实际使用的模型名称，用于追踪和审计。 */, QwenUsage usage /* 字段作用：该不可变对象携带的 usage 数据。 */) { // 类型作用：响应 DTO，规定接口返回给前端的 JSON 字段。
     }
 
-    record QwenEmbeddingData(int index, List<Double> embedding) {
+    record QwenEmbeddingData(int index /* 字段作用：该不可变对象携带的 index 数据。 */, List<Double> embedding /* 字段作用：该不可变对象携带的 embedding 数据。 */) { // 类型作用：Qwen 适配器，负责请求组装、远程调用和响应校验。
     }
 
     record QwenUsage(
-            @JsonProperty("prompt_tokens") Integer promptTokens,
-            @JsonProperty("total_tokens") Integer totalTokens) {
+            @JsonProperty("prompt_tokens") Integer promptTokens /* 字段作用：模型输入或输出的 Token 数量。 */,
+            @JsonProperty("total_tokens") Integer totalTokens /* 字段作用：模型输入或输出的 Token 数量。 */) { // 类型作用：Qwen 适配器，负责请求组装、远程调用和响应校验。
     }
 }

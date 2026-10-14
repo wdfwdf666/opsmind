@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import org.springframework.stereotype.Component;
 
@@ -7,10 +7,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-@Component
-public class ChineseNgramTokenizer {
+@Component // 注解作用：把普通组件交给 Spring 容器管理。
+public class ChineseNgramTokenizer { // 类型作用：封装 ChineseNgramTokenizer 对应的单一职责，供当前模块协作使用。
 
-    public List<String> tokenize(String input) {
+    public List<String> tokenize(String input) { // 方法作用：把外部或数据库数据转换成项目内部对象。
         String normalized = Normalizer.normalize(input == null ? "" : input, Normalizer.Form.NFKC)
                 .toLowerCase(Locale.ROOT);
         List<String> tokens = new ArrayList<>();
@@ -34,7 +34,7 @@ public class ChineseNgramTokenizer {
         return List.copyOf(tokens);
     }
 
-    private void flushHan(List<String> run, List<String> tokens) {
+    private void flushHan(List<String> run, List<String> tokens) { // 方法作用：完成“flushHan”对应的内部步骤，供主流程复用。
         if (run.isEmpty()) {
             return;
         }
@@ -45,7 +45,7 @@ public class ChineseNgramTokenizer {
         run.clear();
     }
 
-    private void flushLatin(StringBuilder token, List<String> tokens) {
+    private void flushLatin(StringBuilder token, List<String> tokens) { // 方法作用：完成“flushLatin”对应的内部步骤，供主流程复用。
         if (!token.isEmpty()) {
             tokens.add(token.toString());
             token.setLength(0);

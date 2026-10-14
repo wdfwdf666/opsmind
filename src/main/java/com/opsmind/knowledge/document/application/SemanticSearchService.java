@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.config.EmbeddingProperties;
 import com.opsmind.knowledge.document.domain.ChunkEmbeddingRepository;
@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.UUID;
 
-@Service
-public class SemanticSearchService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class SemanticSearchService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private static final int MAX_QUERY_CHARACTERS = 1000;
 
@@ -25,13 +25,13 @@ public class SemanticSearchService {
     public SemanticSearchService(
             EmbeddingProvider embeddingProvider,
             ChunkEmbeddingRepository embeddingRepository,
-            EmbeddingProperties properties) {
+            EmbeddingProperties properties) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.embeddingProvider = embeddingProvider;
         this.embeddingRepository = embeddingRepository;
         this.properties = properties;
     }
 
-    public SemanticSearchResult search(String query, Integer requestedTopK, UUID documentId) {
+    public SemanticSearchResult search(String query, Integer requestedTopK, UUID documentId) { // 方法作用：执行检索或相关性排序并返回有序结果。
         String normalizedQuery = validateQuery(query);
         int topK = requestedTopK == null ? properties.defaultTopK() : requestedTopK;
         if (topK < 1 || topK > properties.maxTopK()) {
@@ -48,7 +48,7 @@ public class SemanticSearchService {
                 normalizedQuery, embeddingProvider.model(), documentId, nearest.candidateCount(), hits);
     }
 
-    private String validateQuery(String query) {
+    private String validateQuery(String query) { // 方法作用：完成“validateQuery”对应的内部步骤，供主流程复用。
         if (query == null || query.isBlank()) {
             throw new DocumentException("SEARCH_QUERY_EMPTY", "Search query must not be blank", HttpStatus.BAD_REQUEST);
         }
@@ -62,7 +62,7 @@ public class SemanticSearchService {
         return normalized;
     }
 
-    private SemanticSearchHit toHit(ScoredEmbeddedChunk candidate) {
+    private SemanticSearchHit toHit(ScoredEmbeddedChunk candidate) { // 方法作用：把外部或数据库数据转换成项目内部对象。
         return new SemanticSearchHit(
                 candidate.chunkId(), candidate.parentId(), candidate.documentId(), candidate.filename(),
                 candidate.headingPath(), candidate.childText(), candidate.parentText(), candidate.score());

@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import org.springframework.stereotype.Component;
 
@@ -6,10 +6,10 @@ import java.text.Normalizer;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
-@Component
-public class DocumentTextCleaner {
+@Component // 注解作用：把普通组件交给 Spring 容器管理。
+public class DocumentTextCleaner { // 类型作用：封装 DocumentTextCleaner 对应的单一职责，供当前模块协作使用。
 
-    public String clean(String source) {
+    public String clean(String source) { // 方法作用：完成“clean”对应的内部步骤，供主流程复用。
         if (source == null || source.isBlank()) {
             return "";
         }

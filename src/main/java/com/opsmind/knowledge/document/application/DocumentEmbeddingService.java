@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.domain.ChunkEmbedding;
 import com.opsmind.knowledge.document.domain.ChunkEmbeddingRepository;
@@ -17,8 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-@Service
-public class DocumentEmbeddingService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class DocumentEmbeddingService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private final DocumentRepository documentRepository;
     private final DocumentChunkRepository chunkRepository;
@@ -26,12 +26,12 @@ public class DocumentEmbeddingService {
     private final EmbeddingProvider embeddingProvider;
     private final Clock clock;
 
-    @Autowired
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
     public DocumentEmbeddingService(
             DocumentRepository documentRepository,
             DocumentChunkRepository chunkRepository,
             ChunkEmbeddingRepository embeddingRepository,
-            EmbeddingProvider embeddingProvider) {
+            EmbeddingProvider embeddingProvider) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(documentRepository, chunkRepository, embeddingRepository, embeddingProvider, Clock.systemUTC());
     }
 
@@ -40,7 +40,7 @@ public class DocumentEmbeddingService {
             DocumentChunkRepository chunkRepository,
             ChunkEmbeddingRepository embeddingRepository,
             EmbeddingProvider embeddingProvider,
-            Clock clock) {
+            Clock clock) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.documentRepository = documentRepository;
         this.chunkRepository = chunkRepository;
         this.embeddingRepository = embeddingRepository;
@@ -48,7 +48,7 @@ public class DocumentEmbeddingService {
         this.clock = clock;
     }
 
-    public DocumentEmbeddingResult rebuild(UUID documentId) {
+    public DocumentEmbeddingResult rebuild(UUID documentId) { // 方法作用：完成“rebuild”对应的内部步骤，供主流程复用。
         if (documentRepository.findById(documentId).isEmpty()) {
             throw new DocumentException("DOCUMENT_NOT_FOUND", "Document not found", HttpStatus.NOT_FOUND);
         }
@@ -73,13 +73,13 @@ public class DocumentEmbeddingService {
                 documentId, embeddingProvider.model(), embeddingProvider.dimension(), embeddings.size());
     }
 
-    private String embeddingInput(DocumentChunk chunk) {
+    private String embeddingInput(DocumentChunk chunk) { // 方法作用：完成“embeddingInput”对应的内部步骤，供主流程复用。
         return chunk.headingPath() == null || chunk.headingPath().isBlank()
                 ? chunk.text()
                 : chunk.headingPath() + "\n\n" + chunk.text();
     }
 
-    private void validateVectors(int expectedSize, List<double[]> vectors) {
+    private void validateVectors(int expectedSize, List<double[]> vectors) { // 方法作用：完成“validateVectors”对应的内部步骤，供主流程复用。
         if (vectors.size() != expectedSize) {
             throw new IllegalStateException("Embedding provider returned an unexpected number of vectors");
         }

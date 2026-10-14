@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.domain.DocumentContent;
 import com.opsmind.knowledge.document.domain.DocumentContentRepository;
@@ -24,8 +24,8 @@ import java.util.UUID;
  * 文档解析流水线：领取任务 → 读取原文件 → Tika 提取文本 → 清洗 → 保存 → 更新状态。
  * <p>“任务表 + 租约”让失败任务可以重试，并避免多个请求同时处理同一文档。</p>
  */
-@Service
-public class DocumentIngestionService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class DocumentIngestionService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 2000;
     // RUNNING 超过 5 分钟可被重新领取，用于处理进程崩溃后遗留的“假运行”任务。
@@ -39,14 +39,14 @@ public class DocumentIngestionService {
     private final DocumentContentRepository contentRepository;
     private final Clock clock;
 
-    @Autowired
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
     public DocumentIngestionService(
             DocumentStorage storage,
             DocumentParser parser,
             DocumentTextCleaner cleaner,
             DocumentRepository documentRepository,
             IngestionTaskRepository taskRepository,
-            DocumentContentRepository contentRepository) {
+            DocumentContentRepository contentRepository) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(storage, parser, cleaner, documentRepository, taskRepository, contentRepository, Clock.systemUTC());
     }
 
@@ -57,7 +57,7 @@ public class DocumentIngestionService {
             DocumentRepository documentRepository,
             IngestionTaskRepository taskRepository,
             DocumentContentRepository contentRepository,
-            Clock clock) {
+            Clock clock) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.storage = storage;
         this.parser = parser;
         this.cleaner = cleaner;
@@ -67,7 +67,7 @@ public class DocumentIngestionService {
         this.clock = clock;
     }
 
-    public DocumentIngestionResult process(UUID documentId) {
+    public DocumentIngestionResult process(UUID documentId) { // 方法作用：解析原文、清洗正文并更新入库任务状态。
         KnowledgeDocument document = requireDocument(documentId);
         // getOrCreate 使接口具有幂等性：重复调用继续使用同一任务，而不是无限创建任务。
         IngestionTask task = taskRepository.getOrCreate(documentId, clock.instant());
@@ -119,7 +119,7 @@ public class DocumentIngestionService {
         }
     }
 
-    public DocumentContent findContent(UUID documentId) {
+    public DocumentContent findContent(UUID documentId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         requireDocument(documentId);
         return contentRepository.findByDocumentId(documentId)
                 .orElseThrow(() -> new DocumentException(
@@ -128,7 +128,7 @@ public class DocumentIngestionService {
                         HttpStatus.CONFLICT));
     }
 
-    private DocumentIngestionResult completedResult(UUID documentId) {
+    private DocumentIngestionResult completedResult(UUID documentId) { // 方法作用：完成“completedResult”对应的内部步骤，供主流程复用。
         KnowledgeDocument document = requireDocument(documentId);
         IngestionTask task = taskRepository.findByDocumentId(documentId)
                 .orElseThrow(() -> new IllegalStateException("Document task is missing"));
@@ -140,7 +140,7 @@ public class DocumentIngestionService {
         return new DocumentIngestionResult(document, task, content);
     }
 
-    private KnowledgeDocument requireDocument(UUID documentId) {
+    private KnowledgeDocument requireDocument(UUID documentId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         return documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentException(
                         "DOCUMENT_NOT_FOUND",
@@ -148,7 +148,7 @@ public class DocumentIngestionService {
                         HttpStatus.NOT_FOUND));
     }
 
-    private ParsedDocument parse(KnowledgeDocument document) {
+    private ParsedDocument parse(KnowledgeDocument document) { // 方法作用：把外部或数据库数据转换成项目内部对象。
         try (InputStream inputStream = storage.open(document.storageKey())) {
             return parser.parse(inputStream, document.originalFilename(), document.mediaType());
         } catch (IOException exception) {
@@ -159,7 +159,7 @@ public class DocumentIngestionService {
         }
     }
 
-    private void markFailed(UUID documentId, RuntimeException exception) {
+    private void markFailed(UUID documentId, RuntimeException exception) { // 方法作用：更新数据或状态，并保持并发一致性。
         Instant failedAt = clock.instant();
         String message = exception.getMessage() == null ? "Document processing failed" : exception.getMessage();
         if (message.length() > MAX_ERROR_MESSAGE_LENGTH) {
@@ -169,7 +169,7 @@ public class DocumentIngestionService {
         taskRepository.markFailed(documentId, failedAt, message);
     }
 
-    private String normalizeTitle(String title) {
+    private String normalizeTitle(String title) { // 方法作用：完成“normalizeTitle”对应的内部步骤，供主流程复用。
         if (title == null || title.isBlank()) {
             return null;
         }

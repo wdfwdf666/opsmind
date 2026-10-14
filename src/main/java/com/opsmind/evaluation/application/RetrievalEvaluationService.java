@@ -1,4 +1,4 @@
-package com.opsmind.evaluation.application;
+package com.opsmind.evaluation.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.evaluation.domain.RetrievalEvaluationCase;
 import com.opsmind.evaluation.domain.RetrievalEvaluationCaseResult;
@@ -26,8 +26,8 @@ import java.util.function.LongSupplier;
  * <p>对固定问题集运行 VECTOR/HYBRID/RERANKED，计算 Recall@K、MRR@K、HitRate@K
  * 与延迟分位数，用客观指标判断一次算法修改是否真的提升效果。</p>
  */
-@Service
-public class RetrievalEvaluationService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class RetrievalEvaluationService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private static final double NANOS_PER_MILLISECOND = 1_000_000.0;
 
@@ -37,12 +37,12 @@ public class RetrievalEvaluationService {
     private final RerankedSearchService rerankedSearchService;
     private final LongSupplier nanoTime;
 
-    @Autowired
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
     public RetrievalEvaluationService(
             RetrievalEvaluationDatasetLoader datasetLoader,
             SemanticSearchService searchService,
             HybridSearchService hybridSearchService,
-            RerankedSearchService rerankedSearchService) {
+            RerankedSearchService rerankedSearchService) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(datasetLoader, searchService, hybridSearchService, rerankedSearchService, System::nanoTime);
     }
 
@@ -52,7 +52,7 @@ public class RetrievalEvaluationService {
             SemanticSearchService searchService,
             HybridSearchService hybridSearchService,
             RerankedSearchService rerankedSearchService,
-            LongSupplier nanoTime) {
+            LongSupplier nanoTime) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.datasetLoader = datasetLoader;
         this.searchService = searchService;
         this.hybridSearchService = hybridSearchService;
@@ -60,7 +60,7 @@ public class RetrievalEvaluationService {
         this.nanoTime = nanoTime;
     }
 
-    public RetrievalEvaluationReport run(String datasetName, UUID documentId, RetrievalStrategy requestedStrategy) {
+    public RetrievalEvaluationReport run(String datasetName, UUID documentId, RetrievalStrategy requestedStrategy) { // 方法作用：加载固定评测集，逐条执行并汇总质量与延迟指标。
         RetrievalStrategy strategy = requestedStrategy == null ? RetrievalStrategy.VECTOR : requestedStrategy;
         RetrievalEvaluationDataset dataset = datasetLoader.load(datasetName);
         int maxK = dataset.cutoffs().stream().mapToInt(Integer::intValue).max().orElseThrow();
@@ -85,7 +85,7 @@ public class RetrievalEvaluationService {
                 List.copyOf(caseResults));
     }
 
-    private SemanticSearchResult search(RetrievalStrategy strategy, String query, int topK, UUID documentId) {
+    private SemanticSearchResult search(RetrievalStrategy strategy, String query, int topK, UUID documentId) { // 方法作用：执行检索或相关性排序并返回有序结果。
         return switch (strategy) {
             case VECTOR -> searchService.search(query, topK, documentId);
             case HYBRID -> hybridSearchService.search(query, topK, documentId);
@@ -94,7 +94,7 @@ public class RetrievalEvaluationService {
     }
 
     private RetrievalEvaluationCaseResult toCaseResult(
-            RetrievalEvaluationCase evaluationCase, SemanticSearchResult searchResult, double latencyMs) {
+            RetrievalEvaluationCase evaluationCase, SemanticSearchResult searchResult, double latencyMs) { // 方法作用：把外部或数据库数据转换成项目内部对象。
         List<String> headings = searchResult.hits().stream().map(SemanticSearchHit::headingPath).toList();
         Set<String> expected = new HashSet<>(evaluationCase.expectedHeadingPaths());
         Integer firstRelevantRank = null;
@@ -109,7 +109,7 @@ public class RetrievalEvaluationService {
                 headings, firstRelevantRank, searchResult.candidateCount(), latencyMs);
     }
 
-    private RetrievalMetricAtK metricAtK(List<RetrievalEvaluationCaseResult> cases, int k) {
+    private RetrievalMetricAtK metricAtK(List<RetrievalEvaluationCaseResult> cases, int k) { // 方法作用：完成“metricAtK”对应的内部步骤，供主流程复用。
         // Recall 衡量相关结果找回多少；MRR 重视第一个相关结果的位置；HitRate 衡量是否至少命中一个。
         double recall = cases.stream().mapToDouble(result -> recallAtK(result, k)).average().orElse(0);
         double mrr = cases.stream().mapToDouble(result -> reciprocalRankAtK(result, k)).average().orElse(0);
@@ -117,22 +117,22 @@ public class RetrievalEvaluationService {
         return new RetrievalMetricAtK(k, recall, mrr, hitRate);
     }
 
-    private double recallAtK(RetrievalEvaluationCaseResult result, int k) {
+    private double recallAtK(RetrievalEvaluationCaseResult result, int k) { // 方法作用：完成“recallAtK”对应的内部步骤，供主流程复用。
         Set<String> expected = new HashSet<>(result.expectedHeadingPaths());
         long relevantRetrieved = result.retrievedHeadingPaths().stream().limit(k).distinct()
                 .filter(expected::contains).count();
         return relevantRetrieved / (double) expected.size();
     }
 
-    private double reciprocalRankAtK(RetrievalEvaluationCaseResult result, int k) {
+    private double reciprocalRankAtK(RetrievalEvaluationCaseResult result, int k) { // 方法作用：完成“reciprocalRankAtK”对应的内部步骤，供主流程复用。
         return isHitAtK(result, k) ? 1.0 / result.firstRelevantRank() : 0;
     }
 
-    private boolean isHitAtK(RetrievalEvaluationCaseResult result, int k) {
+    private boolean isHitAtK(RetrievalEvaluationCaseResult result, int k) { // 方法作用：判断当前数据或状态是否满足指定条件。
         return result.firstRelevantRank() != null && result.firstRelevantRank() <= k;
     }
 
-    private double percentile(List<Double> sortedValues, double percentile) {
+    private double percentile(List<Double> sortedValues, double percentile) { // 方法作用：完成“percentile”对应的内部步骤，供主流程复用。
         int index = Math.max(0, (int) Math.ceil(percentile * sortedValues.size()) - 1);
         return sortedValues.get(index);
     }

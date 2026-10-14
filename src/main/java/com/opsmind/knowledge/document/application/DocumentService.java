@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.domain.DocumentException;
 import com.opsmind.knowledge.document.domain.DocumentRepository;
@@ -20,8 +20,8 @@ import java.util.UUID;
  * <p>它编排校验、内容去重、文件保存、元数据入库和任务创建，但不关心这些动作的具体技术实现。</p>
  */
 // @Service 是 @Component 的业务语义版本；启动时 Spring 会创建单例对象并允许其他类注入它。
-@Service
-public class DocumentService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class DocumentService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private final DocumentValidationService validationService;
     private final DocumentStorage storage;
@@ -30,12 +30,12 @@ public class DocumentService {
     private final Clock clock;
 
     // @Autowired 明确告诉 Spring 使用这个面向生产的构造器；Clock 使用系统 UTC 时间。
-    @Autowired
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
     public DocumentService(
             DocumentValidationService validationService,
             DocumentStorage storage,
             DocumentRepository documentRepository,
-            IngestionTaskRepository taskRepository) {
+            IngestionTaskRepository taskRepository) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(validationService, storage, documentRepository, taskRepository, Clock.systemUTC());
     }
 
@@ -45,7 +45,7 @@ public class DocumentService {
             DocumentStorage storage,
             DocumentRepository documentRepository,
             IngestionTaskRepository taskRepository,
-            Clock clock) {
+            Clock clock) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.validationService = validationService;
         this.storage = storage;
         this.documentRepository = documentRepository;
@@ -53,7 +53,7 @@ public class DocumentService {
         this.clock = clock;
     }
 
-    public DocumentUploadResult upload(MultipartFile file) {
+    public DocumentUploadResult upload(MultipartFile file) { // 方法作用：校验并保存上传文件，内容重复时返回已有文档。
         // 先做大小、扩展名、真实文件签名和 SHA-256 计算，非法文件不会进入存储层。
         ValidatedDocument validated = validationService.validate(file);
         // 相同内容具有相同 SHA-256；先查重可以节省磁盘、解析和向量模型调用成本。
@@ -74,13 +74,13 @@ public class DocumentService {
         return new DocumentUploadResult(saved.document(), taskFor(saved.document().id()), !saved.created());
     }
 
-    public DocumentUploadResult find(UUID documentId) {
+    public DocumentUploadResult find(UUID documentId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         KnowledgeDocument document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentException("DOCUMENT_NOT_FOUND", "Document not found", HttpStatus.NOT_FOUND));
         return new DocumentUploadResult(document, taskFor(document.id()), false);
     }
 
-    private IngestionTask taskFor(UUID documentId) {
+    private IngestionTask taskFor(UUID documentId) { // 方法作用：完成“taskFor”对应的内部步骤，供主流程复用。
         return taskRepository.getOrCreate(documentId, clock.instant());
     }
 }

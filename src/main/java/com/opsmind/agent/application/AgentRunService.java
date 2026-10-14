@@ -1,4 +1,4 @@
-package com.opsmind.agent.application;
+package com.opsmind.agent.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,8 +34,8 @@ import java.util.function.Supplier;
  * <p>一次运行会经过：接收请求 → Planner 路由 → 调用只读知识工具 → 返回答案，
  * 或生成工单草稿 → 等待人工审批 → 创建工单。每一步都写入审计表。</p>
  */
-@Service
-public class AgentRunService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class AgentRunService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private static final int MAX_QUERY_CHARACTERS = 1000;
     private static final int MAX_DECISION_REASON_CHARACTERS = 500;
@@ -52,14 +52,14 @@ public class AgentRunService {
     private final Supplier<UUID> idSupplier;
     private final ObjectMapper objectMapper;
 
-    @Autowired
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
     public AgentRunService(
             AgentAuditRepository auditRepository,
             SupportTicketRepository ticketRepository,
             KnowledgeSearchAgentTool knowledgeSearchTool,
             CreateTicketAgentTool createTicketTool,
             AgentToolPolicy toolPolicy,
-            AgentPlanner planner) {
+            AgentPlanner planner) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(
                 auditRepository, ticketRepository, knowledgeSearchTool, createTicketTool, toolPolicy, planner,
                 Clock.systemUTC(), UUID::randomUUID, new ObjectMapper());
@@ -74,7 +74,7 @@ public class AgentRunService {
             AgentPlanner planner,
             Clock clock,
             Supplier<UUID> idSupplier,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.auditRepository = auditRepository;
         this.ticketRepository = ticketRepository;
         this.knowledgeSearchTool = knowledgeSearchTool;
@@ -86,12 +86,12 @@ public class AgentRunService {
         this.objectMapper = objectMapper;
     }
 
-    public AgentRunView start(String rawQuery, UUID documentId) {
+    public AgentRunView start(String rawQuery, UUID documentId) { // 方法作用：创建 Agent Run，并按规划结果进入受控执行流程。
         return start(rawQuery, documentId, null);
     }
 
     /** taskType 为空时交给 Planner 判断，非空时尊重调用方显式选择。 */
-    public AgentRunView start(String rawQuery, UUID documentId, AgentTaskType requestedTaskType) {
+    public AgentRunView start(String rawQuery, UUID documentId, AgentTaskType requestedTaskType) { // 方法作用：创建 Agent Run，并按规划结果进入受控执行流程。
         String query = validateQuery(rawQuery);
         AgentPlan plan = requestedTaskType == null ? planner.plan(query) : AgentPlan.explicit(requestedTaskType);
         AgentTaskType taskType = plan.taskType();
@@ -117,8 +117,8 @@ public class AgentRunService {
     }
 
     // @Transactional 表示审批、创建工单和状态更新共享数据库事务；异常时整体回滚。
-    @Transactional
-    public AgentRunView decide(UUID runId, AgentApprovalStatus decision, String rawReason) {
+    @Transactional // 注解作用：让方法在同一数据库事务中执行，异常时回滚。
+    public AgentRunView decide(UUID runId, AgentApprovalStatus decision, String rawReason) { // 方法作用：处理人工批准或拒绝；批准后才执行写工具。
         if (decision == null || decision == AgentApprovalStatus.PENDING) {
             throw new AgentException(
                     "AGENT_APPROVAL_DECISION_INVALID",
@@ -175,7 +175,7 @@ public class AgentRunService {
         return get(runId);
     }
 
-    public AgentRunView get(UUID runId) {
+    public AgentRunView get(UUID runId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         AgentRun run = auditRepository.findRun(runId)
                 .orElseThrow(() -> new AgentException(
                         "AGENT_RUN_NOT_FOUND", "Agent run not found: " + runId, HttpStatus.NOT_FOUND));
@@ -186,7 +186,7 @@ public class AgentRunService {
                 ticketRepository.findByRunId(runId).orElse(null));
     }
 
-    private AgentRunView startKnowledgeRun(UUID runId, String query, UUID documentId, AgentPlan plan) {
+    private AgentRunView startKnowledgeRun(UUID runId, String query, UUID documentId, AgentPlan plan) { // 方法作用：完成“startKnowledgeRun”对应的内部步骤，供主流程复用。
         append(runId, 2, AgentStepType.PLANNED, knowledgeSearchTool, true,
                 Map.of("strategy", "CONTROLLED_SINGLE_TOOL", "tool", knowledgeSearchTool.name(),
                         "plannerProvider", plan.provider(), "plannerModel", plan.model(), "plannerReason", plan.reason()));
@@ -197,7 +197,7 @@ public class AgentRunService {
         return get(runId);
     }
 
-    private AgentRunView startTicketRun(UUID runId, String query, UUID documentId, AgentPlan plan) {
+    private AgentRunView startTicketRun(UUID runId, String query, UUID documentId, AgentPlan plan) { // 方法作用：完成“startTicketRun”对应的内部步骤，供主流程复用。
         append(runId, 2, AgentStepType.PLANNED, null, true,
                 Map.of(
                         "strategy", "DETERMINISTIC_APPROVAL_FLOW",
@@ -223,7 +223,7 @@ public class AgentRunService {
         return get(runId);
     }
 
-    private RagAnswerResult executeKnowledge(UUID runId, String query, UUID documentId, int sequence) {
+    private RagAnswerResult executeKnowledge(UUID runId, String query, UUID documentId, int sequence) { // 方法作用：执行当前工具封装的具体能力并返回结果。
         try {
             toolPolicy.requireAutoExecutable(knowledgeSearchTool);
             RagAnswerResult answer = knowledgeSearchTool.execute(new AgentToolInput(query, documentId));
@@ -246,7 +246,7 @@ public class AgentRunService {
         }
     }
 
-    private boolean isSameCompletedDecision(AgentRunView view, AgentApprovalStatus decision) {
+    private boolean isSameCompletedDecision(AgentRunView view, AgentApprovalStatus decision) { // 方法作用：判断当前数据或状态是否满足指定条件。
         return (view.run().status() == AgentRunStatus.COMPLETED
                 && view.approval().status() == AgentApprovalStatus.APPROVED
                 && decision == AgentApprovalStatus.APPROVED)
@@ -255,7 +255,7 @@ public class AgentRunService {
                 && decision == AgentApprovalStatus.REJECTED);
     }
 
-    private TicketDraft ticketDraft(String query, RagAnswerResult evidence) {
+    private TicketDraft ticketDraft(String query, RagAnswerResult evidence) { // 方法作用：完成“ticketDraft”对应的内部步骤，供主流程复用。
         String title = truncate(query.replaceAll("\\s+", " "), MAX_TICKET_TITLE_CHARACTERS);
         String description = "用户描述：\n" + query + "\n\n知识库建议：\n" + evidence.answer();
         return new TicketDraft(title, truncate(description, MAX_TICKET_DESCRIPTION_CHARACTERS), TicketPriority.P2);
@@ -267,7 +267,7 @@ public class AgentRunService {
             AgentStepType type,
             AgentTool<?, ?> tool,
             boolean success,
-            Map<String, ?> detail) {
+            Map<String, ?> detail) { // 方法作用：完成“append”对应的内部步骤，供主流程复用。
         // 所有轨迹统一从这里追加，sequence 保证 UI 按真实执行顺序展示。
         auditRepository.appendStep(step(runId, sequence, type, tool, success, detail));
     }
@@ -278,14 +278,14 @@ public class AgentRunService {
             AgentStepType type,
             AgentTool<?, ?> tool,
             boolean success,
-            Map<String, ?> detail) {
+            Map<String, ?> detail) { // 方法作用：完成“step”对应的内部步骤，供主流程复用。
         return new AgentStep(
                 idSupplier.get(), runId, sequence, type,
                 tool == null ? null : tool.name(), tool == null ? null : tool.risk(),
                 success, json(detail), clock.instant());
     }
 
-    private String validateQuery(String rawQuery) {
+    private String validateQuery(String rawQuery) { // 方法作用：完成“validateQuery”对应的内部步骤，供主流程复用。
         if (rawQuery == null || rawQuery.isBlank()) {
             throw new AgentException("AGENT_QUERY_REQUIRED", "Agent query must not be blank", HttpStatus.BAD_REQUEST);
         }
@@ -299,7 +299,7 @@ public class AgentRunService {
         return query;
     }
 
-    private String validateDecisionReason(String rawReason) {
+    private String validateDecisionReason(String rawReason) { // 方法作用：完成“validateDecisionReason”对应的内部步骤，供主流程复用。
         if (rawReason == null || rawReason.isBlank()) {
             return null;
         }
@@ -313,11 +313,11 @@ public class AgentRunService {
         return reason;
     }
 
-    private String truncate(String value, int limit) {
+    private String truncate(String value, int limit) { // 方法作用：完成“truncate”对应的内部步骤，供主流程复用。
         return value.length() <= limit ? value : value.substring(0, limit);
     }
 
-    private String json(Map<String, ?> detail) {
+    private String json(Map<String, ?> detail) { // 方法作用：完成“json”对应的内部步骤，供主流程复用。
         try {
             return objectMapper.writeValueAsString(detail);
         } catch (JsonProcessingException exception) {
@@ -325,7 +325,7 @@ public class AgentRunService {
         }
     }
 
-    private int value(Integer value) {
+    private int value(Integer value) { // 方法作用：完成“value”对应的内部步骤，供主流程复用。
         return value == null ? 0 : value;
     }
 }

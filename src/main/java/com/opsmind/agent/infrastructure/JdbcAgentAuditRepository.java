@@ -1,4 +1,4 @@
-package com.opsmind.agent.infrastructure;
+package com.opsmind.agent.infrastructure; // 包作用：基础设施层，实现数据库、文件系统和外部模型调用。
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -29,21 +29,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-@Repository
-public class JdbcAgentAuditRepository implements AgentAuditRepository {
+@Repository // 注解作用：标记数据库访问组件，并启用数据访问异常转换。
+public class JdbcAgentAuditRepository implements AgentAuditRepository { // 类型作用：JDBC 仓储实现，使用参数化 SQL 读写数据库。
 
-    private static final TypeReference<List<RagCitation>> CITATION_LIST = new TypeReference<>() {
+    private static final TypeReference<List<RagCitation>> CITATION_LIST = new TypeReference<>() { // 类型作用：封装  对应的单一职责，供当前模块协作使用。
     };
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public JdbcAgentAuditRepository(JdbcTemplate jdbcTemplate) {
+    public JdbcAgentAuditRepository(JdbcTemplate jdbcTemplate) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @Override
-    public void create(AgentRun run) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public void create(AgentRun run) { // 方法作用：创建或保存数据，并返回持久化结果。
         jdbcTemplate.update("""
                         INSERT INTO agent_run
                             (id, query_text, document_id, task_type, task_type_source, planner_provider,
@@ -55,8 +55,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 Timestamp.from(run.createdAt()), Timestamp.from(run.updatedAt()));
     }
 
-    @Override
-    public void appendStep(AgentStep step) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public void appendStep(AgentStep step) { // 方法作用：完成“appendStep”对应的内部步骤，供主流程复用。
         jdbcTemplate.update("""
                         INSERT INTO agent_step
                             (id, run_id, sequence_no, step_type, tool_name, tool_risk, success, detail_json, created_at)
@@ -67,8 +67,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 Timestamp.from(step.createdAt()));
     }
 
-    @Override
-    public void complete(UUID runId, RagAnswerResult answer, Instant completedAt) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public void complete(UUID runId, RagAnswerResult answer, Instant completedAt) { // 方法作用：完成“complete”对应的内部步骤，供主流程复用。
         jdbcTemplate.update("""
                         UPDATE agent_run
                         SET status = ?, answer_text = ?, refused = ?, refusal_reason = ?, top_evidence_score = ?,
@@ -80,14 +80,14 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 citationsJson(answer.citations()), Timestamp.from(completedAt), Timestamp.from(completedAt), runId);
     }
 
-    @Override
-    @Transactional
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    @Transactional // 注解作用：让方法在同一数据库事务中执行，异常时回滚。
     public void requestApproval(
             UUID runId,
             RagAnswerResult evidence,
             AgentApproval approval,
             AgentStep approvalStep,
-            Instant updatedAt) {
+            Instant updatedAt) { // 方法作用：完成“requestApproval”对应的内部步骤，供主流程复用。
         jdbcTemplate.update("""
                         INSERT INTO agent_approval
                             (id, run_id, tool_name, tool_risk, status, draft_title, draft_description,
@@ -112,12 +112,12 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
         appendStep(approvalStep);
     }
 
-    @Override
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
     public boolean decideApproval(
             UUID runId,
             AgentApprovalStatus decision,
             String decisionReason,
-            Instant decidedAt) {
+            Instant decidedAt) { // 方法作用：完成“decideApproval”对应的内部步骤，供主流程复用。
         return jdbcTemplate.update("""
                         UPDATE agent_approval
                         SET status = ?, decision_reason = ?, decided_at = ?
@@ -127,8 +127,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 AgentApprovalStatus.PENDING.name()) == 1;
     }
 
-    @Override
-    public void completeWrite(UUID runId, String answer, Instant completedAt) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public void completeWrite(UUID runId, String answer, Instant completedAt) { // 方法作用：完成“completeWrite”对应的内部步骤，供主流程复用。
         jdbcTemplate.update("""
                         UPDATE agent_run
                         SET status = ?, answer_text = ?, refused = FALSE, refusal_reason = NULL,
@@ -139,8 +139,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 runId, AgentRunStatus.WAITING_APPROVAL.name());
     }
 
-    @Override
-    public void reject(UUID runId, String answer, Instant completedAt) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public void reject(UUID runId, String answer, Instant completedAt) { // 方法作用：完成“reject”对应的内部步骤，供主流程复用。
         jdbcTemplate.update("""
                         UPDATE agent_run
                         SET status = ?, answer_text = ?, refused = FALSE, refusal_reason = NULL,
@@ -151,8 +151,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 runId, AgentRunStatus.WAITING_APPROVAL.name());
     }
 
-    @Override
-    public void fail(UUID runId, String errorCode, String errorMessage, Instant completedAt) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public void fail(UUID runId, String errorCode, String errorMessage, Instant completedAt) { // 方法作用：完成“fail”对应的内部步骤，供主流程复用。
         jdbcTemplate.update("""
                         UPDATE agent_run
                         SET status = ?, error_code = ?, error_message = ?, updated_at = ?, completed_at = ?
@@ -162,8 +162,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 Timestamp.from(completedAt), Timestamp.from(completedAt), runId);
     }
 
-    @Override
-    public Optional<AgentRun> findRun(UUID runId) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public Optional<AgentRun> findRun(UUID runId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         List<AgentRun> runs = jdbcTemplate.query("""
                         SELECT id, query_text, document_id, task_type, task_type_source, planner_provider,
                                planner_model, planner_reason, status, answer_text, refused, refusal_reason,
@@ -175,8 +175,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
         return runs.stream().findFirst();
     }
 
-    @Override
-    public Optional<AgentApproval> findApproval(UUID runId) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public Optional<AgentApproval> findApproval(UUID runId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         List<AgentApproval> approvals = jdbcTemplate.query("""
                         SELECT id, run_id, tool_name, tool_risk, status, draft_title, draft_description,
                                draft_priority, decision_reason, created_at, decided_at
@@ -186,8 +186,8 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
         return approvals.stream().findFirst();
     }
 
-    @Override
-    public List<AgentStep> findSteps(UUID runId) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public List<AgentStep> findSteps(UUID runId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         return jdbcTemplate.query("""
                         SELECT id, run_id, sequence_no, step_type, tool_name, tool_risk,
                                success, detail_json, created_at
@@ -197,7 +197,7 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                         """, this::mapStep, runId);
     }
 
-    private AgentRun mapRun(ResultSet resultSet, int rowNumber) throws SQLException {
+    private AgentRun mapRun(ResultSet resultSet, int rowNumber) throws SQLException { // 方法作用：把外部或数据库数据转换成项目内部对象。
         String refusalReason = resultSet.getString("refusal_reason");
         Timestamp completedAt = resultSet.getTimestamp("completed_at");
         return new AgentRun(
@@ -222,7 +222,7 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 completedAt == null ? null : completedAt.toInstant());
     }
 
-    private AgentApproval mapApproval(ResultSet resultSet, int rowNumber) throws SQLException {
+    private AgentApproval mapApproval(ResultSet resultSet, int rowNumber) throws SQLException { // 方法作用：把外部或数据库数据转换成项目内部对象。
         Timestamp decidedAt = resultSet.getTimestamp("decided_at");
         return new AgentApproval(
                 resultSet.getObject("id", UUID.class),
@@ -239,7 +239,7 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 decidedAt == null ? null : decidedAt.toInstant());
     }
 
-    private AgentStep mapStep(ResultSet resultSet, int rowNumber) throws SQLException {
+    private AgentStep mapStep(ResultSet resultSet, int rowNumber) throws SQLException { // 方法作用：把外部或数据库数据转换成项目内部对象。
         String risk = resultSet.getString("tool_risk");
         return new AgentStep(
                 resultSet.getObject("id", UUID.class),
@@ -253,7 +253,7 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
                 resultSet.getTimestamp("created_at").toInstant());
     }
 
-    private String citationsJson(List<RagCitation> citations) {
+    private String citationsJson(List<RagCitation> citations) { // 方法作用：完成“citationsJson”对应的内部步骤，供主流程复用。
         try {
             return objectMapper.writeValueAsString(citations);
         } catch (JsonProcessingException exception) {
@@ -261,7 +261,7 @@ public class JdbcAgentAuditRepository implements AgentAuditRepository {
         }
     }
 
-    private List<RagCitation> citations(String json) {
+    private List<RagCitation> citations(String json) { // 方法作用：完成“citations”对应的内部步骤，供主流程复用。
         try {
             return objectMapper.readValue(json, CITATION_LIST);
         } catch (JsonProcessingException exception) {

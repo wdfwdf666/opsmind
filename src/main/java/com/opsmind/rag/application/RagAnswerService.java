@@ -1,4 +1,4 @@
-package com.opsmind.rag.application;
+package com.opsmind.rag.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.application.RerankedSearchService;
 import com.opsmind.knowledge.document.domain.DocumentException;
@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
  * <p>RAG 的关键不是“直接问模型”，而是先从企业知识库找到证据，再让模型严格依据证据作答，
  * 最后校验引用编号。这样可以降低幻觉，并让用户追溯答案来源。</p>
  */
-@Service
-public class RagAnswerService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class RagAnswerService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private static final Pattern CITATION_PATTERN = Pattern.compile("\\[S(\\d+)]");
     private static final int EXCERPT_CHARACTERS = 240;
@@ -38,13 +38,13 @@ public class RagAnswerService {
     public RagAnswerService(
             RerankedSearchService searchService,
             AnswerGenerationProvider generationProvider,
-            GenerationProperties properties) {
+            GenerationProperties properties) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.searchService = searchService;
         this.generationProvider = generationProvider;
         this.properties = properties;
     }
 
-    public RagAnswerResult answer(String query, Integer requestedTopK, UUID documentId) {
+    public RagAnswerResult answer(String query, Integer requestedTopK, UUID documentId) { // 方法作用：执行检索、证据门禁、上下文组装、模型生成和引用校验。
         int topK = requestedTopK == null ? properties.evidenceTopK() : requestedTopK;
         // documentId 为 null 时仓储不会增加文档过滤条件，即在整个知识库中自动选择相关内容。
         SemanticSearchResult searchResult = searchService.search(query, topK, documentId);
@@ -78,13 +78,13 @@ public class RagAnswerService {
             UUID documentId,
             RagRefusalReason reason,
             Double topEvidenceScore,
-            String answer) {
+            String answer) { // 方法作用：完成“refusal”对应的内部步骤，供主流程复用。
         return new RagAnswerResult(
                 searchResult.query(), documentId, searchResult.model(), generationProvider.model(), true,
                 reason, topEvidenceScore, answer, List.of(), 0, 0, 0);
     }
 
-    private List<RagEvidence> assembleEvidence(List<SemanticSearchHit> hits) {
+    private List<RagEvidence> assembleEvidence(List<SemanticSearchHit> hits) { // 方法作用：完成“assembleEvidence”对应的内部步骤，供主流程复用。
         List<RagEvidence> evidence = new ArrayList<>();
         Set<UUID> seenParents = new LinkedHashSet<>();
         int remainingCharacters = properties.maxContextCharacters();
@@ -113,14 +113,14 @@ public class RagAnswerService {
         return List.copyOf(evidence);
     }
 
-    private String validateAnswer(GeneratedAnswer generated) {
+    private String validateAnswer(GeneratedAnswer generated) { // 方法作用：完成“validateAnswer”对应的内部步骤，供主流程复用。
         if (generated == null || generated.text() == null || generated.text().isBlank()) {
             throw providerError("empty answer");
         }
         return generated.text().strip();
     }
 
-    private List<RagCitation> referencedCitations(String answer, List<RagEvidence> evidence) {
+    private List<RagCitation> referencedCitations(String answer, List<RagEvidence> evidence) { // 方法作用：完成“referencedCitations”对应的内部步骤，供主流程复用。
         Map<String, RagEvidence> bySourceId = new LinkedHashMap<>();
         evidence.forEach(item -> bySourceId.put(item.sourceId(), item));
         LinkedHashSet<String> referenced = new LinkedHashSet<>();
@@ -139,7 +139,7 @@ public class RagAnswerService {
         return referenced.stream().map(bySourceId::get).map(RagCitation::from).toList();
     }
 
-    private String excerpt(String text) {
+    private String excerpt(String text) { // 方法作用：完成“excerpt”对应的内部步骤，供主流程复用。
         if (text == null) {
             return "";
         }
@@ -149,7 +149,7 @@ public class RagAnswerService {
                 : normalized.substring(0, EXCERPT_CHARACTERS) + "…";
     }
 
-    private DocumentException providerError(String reason) {
+    private DocumentException providerError(String reason) { // 方法作用：完成“providerError”对应的内部步骤，供主流程复用。
         return new DocumentException(
                 "ANSWER_PROVIDER_INVALID_RESPONSE",
                 "Answer provider returned an invalid response: " + reason,

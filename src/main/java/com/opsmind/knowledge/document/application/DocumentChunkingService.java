@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.domain.ChunkType;
 import com.opsmind.knowledge.document.domain.DocumentChunk;
@@ -19,8 +19,8 @@ import java.util.UUID;
 /**
  * 文档分块用例：读取已解析正文，调用纯分块算法，并原子替换数据库中的旧分块。
  */
-@Service
-public class DocumentChunkingService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class DocumentChunkingService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     public static final int DEFAULT_PAGE_SIZE = 50;
     public static final int MAX_PAGE_SIZE = 100;
@@ -31,12 +31,12 @@ public class DocumentChunkingService {
     private final HeadingAwareDocumentChunker chunker;
     private final Clock clock;
 
-    @Autowired
+    @Autowired // 注解作用：要求 Spring 按构造器参数类型注入依赖。
     public DocumentChunkingService(
             DocumentRepository documentRepository,
             DocumentContentRepository contentRepository,
             DocumentChunkRepository chunkRepository,
-            HeadingAwareDocumentChunker chunker) {
+            HeadingAwareDocumentChunker chunker) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this(documentRepository, contentRepository, chunkRepository, chunker, Clock.systemUTC());
     }
 
@@ -45,7 +45,7 @@ public class DocumentChunkingService {
             DocumentContentRepository contentRepository,
             DocumentChunkRepository chunkRepository,
             HeadingAwareDocumentChunker chunker,
-            Clock clock) {
+            Clock clock) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.documentRepository = documentRepository;
         this.contentRepository = contentRepository;
         this.chunkRepository = chunkRepository;
@@ -53,7 +53,7 @@ public class DocumentChunkingService {
         this.clock = clock;
     }
 
-    public DocumentChunkingResult rebuild(UUID documentId) {
+    public DocumentChunkingResult rebuild(UUID documentId) { // 方法作用：完成“rebuild”对应的内部步骤，供主流程复用。
         requireDocument(documentId);
         // 解析完成是分块的前置条件，因此缺少正文返回 409 Conflict，而不是 404。
         DocumentContent content = contentRepository.findByDocumentId(documentId)
@@ -70,7 +70,7 @@ public class DocumentChunkingService {
         return new DocumentChunkingResult(documentId, parentCount, childCount);
     }
 
-    public DocumentChunkPage list(UUID documentId, ChunkType type, int page, int size) {
+    public DocumentChunkPage list(UUID documentId, ChunkType type, int page, int size) { // 方法作用：按稳定顺序或分页条件列出数据。
         requireDocument(documentId);
         if (page < 0) {
             throw new DocumentException(
@@ -85,7 +85,7 @@ public class DocumentChunkingService {
         return chunkRepository.findPage(documentId, type, page, size);
     }
 
-    private void requireDocument(UUID documentId) {
+    private void requireDocument(UUID documentId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         if (documentRepository.findById(documentId).isEmpty()) {
             throw new DocumentException("DOCUMENT_NOT_FOUND", "Document not found", HttpStatus.NOT_FOUND);
         }

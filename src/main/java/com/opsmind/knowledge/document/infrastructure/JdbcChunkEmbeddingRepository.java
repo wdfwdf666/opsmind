@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.infrastructure;
+package com.opsmind.knowledge.document.infrastructure; // 包作用：基础设施层，实现数据库、文件系统和外部模型调用。
 
 import com.opsmind.knowledge.document.domain.ChunkEmbedding;
 import com.opsmind.knowledge.document.domain.ChunkEmbeddingRepository;
@@ -18,23 +18,23 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
-@Repository
-public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
+@Repository // 注解作用：标记数据库访问组件，并启用数据访问异常转换。
+public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository { // 类型作用：JDBC 仓储实现，使用参数化 SQL 读写数据库。
 
     private final JdbcTemplate jdbcTemplate;
     private final EmbeddingVectorCodec vectorCodec;
     private final boolean postgresql;
 
-    public JdbcChunkEmbeddingRepository(JdbcTemplate jdbcTemplate, EmbeddingVectorCodec vectorCodec) {
+    public JdbcChunkEmbeddingRepository(JdbcTemplate jdbcTemplate, EmbeddingVectorCodec vectorCodec) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.jdbcTemplate = jdbcTemplate;
         this.vectorCodec = vectorCodec;
         this.postgresql = Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection ->
                 "PostgreSQL".equalsIgnoreCase(connection.getMetaData().getDatabaseProductName())));
     }
 
-    @Override
-    @Transactional
-    public void replaceAll(UUID documentId, String model, List<ChunkEmbedding> embeddings) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    @Transactional // 注解作用：让方法在同一数据库事务中执行，异常时回滚。
+    public void replaceAll(UUID documentId, String model, List<ChunkEmbedding> embeddings) { // 方法作用：更新数据或状态，并保持并发一致性。
         jdbcTemplate.update(
                 "DELETE FROM chunk_embedding WHERE document_id = ? AND embedding_model = ?", documentId, model);
         if (embeddings.isEmpty()) {
@@ -49,9 +49,9 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
                     (chunk_id, document_id, embedding_model, dimension, vector_data, content_hash, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
-        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement statement, int index) throws SQLException {
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() { // 类型作用：封装  对应的单一职责，供当前模块协作使用。
+            @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+            public void setValues(PreparedStatement statement, int index) throws SQLException { // 方法作用：完成“setValues”对应的内部步骤，供主流程复用。
                 ChunkEmbedding embedding = embeddings.get(index);
                 statement.setObject(1, embedding.chunkId());
                 statement.setObject(2, embedding.documentId());
@@ -67,22 +67,22 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
                 statement.setTimestamp(7 + offset, Timestamp.from(embedding.createdAt()));
             }
 
-            @Override
-            public int getBatchSize() {
+            @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+            public int getBatchSize() { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
                 return embeddings.size();
             }
         });
     }
 
-    @Override
-    public NearestChunkSearch findNearest(String model, double[] queryVector, UUID documentId, int limit) {
+    @Override // 注解作用：表示该方法实现或覆盖了父接口/父类中的方法。
+    public NearestChunkSearch findNearest(String model, double[] queryVector, UUID documentId, int limit) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         return postgresql
                 ? findNearestWithPgVector(model, queryVector, documentId, limit)
                 : findNearestInMemory(model, queryVector, documentId, limit);
     }
 
     private NearestChunkSearch findNearestWithPgVector(
-            String model, double[] queryVector, UUID documentId, int limit) {
+            String model, double[] queryVector, UUID documentId, int limit) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         String documentFilter = documentId == null ? "" : " AND child.document_id = ?";
         DistanceSql distance = distanceSql(model, queryVector.length);
         int candidateCount = countCandidates(model, queryVector.length, documentId);
@@ -118,7 +118,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
         return new NearestChunkSearch(candidateCount, hits);
     }
 
-    private int countCandidates(String model, int dimension, UUID documentId) {
+    private int countCandidates(String model, int dimension, UUID documentId) { // 方法作用：完成“countCandidates”对应的内部步骤，供主流程复用。
         String documentFilter = documentId == null ? "" : " AND child.document_id = ?";
         String sql = """
                 SELECT COUNT(*)
@@ -134,7 +134,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
     }
 
     private Object[] pgVectorArguments(
-            boolean parameterizedModel, String vector, String model, UUID documentId, int limit) {
+            boolean parameterizedModel, String vector, String model, UUID documentId, int limit) { // 方法作用：完成“pgVectorArguments”对应的内部步骤，供主流程复用。
         java.util.ArrayList<Object> arguments = new java.util.ArrayList<>();
         arguments.add(vector);
         if (parameterizedModel) {
@@ -147,7 +147,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
         return arguments.toArray();
     }
 
-    private DistanceSql distanceSql(String model, int dimension) {
+    private DistanceSql distanceSql(String model, int dimension) { // 方法作用：完成“distanceSql”对应的内部步骤，供主流程复用。
         if ("qwen3.7-text-embedding".equals(model) && dimension == 1024) {
             return new DistanceSql(
                     "embedding.vector_value::vector(1024) <=> CAST(? AS vector(1024))",
@@ -167,7 +167,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
     }
 
     private NearestChunkSearch findNearestInMemory(
-            String model, double[] queryVector, UUID documentId, int limit) {
+            String model, double[] queryVector, UUID documentId, int limit) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         List<EmbeddedChunk> candidates = findCandidates(model, documentId);
         List<ScoredEmbeddedChunk> hits = candidates.stream()
                 .map(candidate -> new ScoredEmbeddedChunk(
@@ -181,7 +181,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
         return new NearestChunkSearch(candidates.size(), hits);
     }
 
-    private List<EmbeddedChunk> findCandidates(String model, UUID documentId) {
+    private List<EmbeddedChunk> findCandidates(String model, UUID documentId) { // 方法作用：按条件读取目标数据，不存在时按约定返回空值或异常。
         String documentFilter = documentId == null ? "" : " AND child.document_id = ?";
         String sql = """
                 SELECT child.id AS chunk_id, child.parent_id, child.document_id,
@@ -206,7 +206,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
                 vectorCodec.decode(resultSet.getString("vector_data"))), arguments);
     }
 
-    private double cosine(double[] left, double[] right) {
+    private double cosine(double[] left, double[] right) { // 方法作用：完成“cosine”对应的内部步骤，供主流程复用。
         if (left.length != right.length) {
             return -1;
         }
@@ -224,7 +224,7 @@ public class JdbcChunkEmbeddingRepository implements ChunkEmbeddingRepository {
         return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
     }
 
-    private record DistanceSql(String expression, String modelPredicate, boolean parameterizedModel) {
+    private record DistanceSql(String expression /* 字段作用：该不可变对象携带的 expression 数据。 */, String modelPredicate /* 字段作用：该不可变对象携带的 modelPredicate 数据。 */, boolean parameterizedModel /* 字段作用：该不可变对象携带的 parameterizedModel 数据。 */) { // 类型作用：不可变数据对象，Java 自动生成构造器、访问方法、equals 和 hashCode。
     }
 
 }

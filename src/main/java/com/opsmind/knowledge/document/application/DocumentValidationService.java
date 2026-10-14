@@ -1,4 +1,4 @@
-package com.opsmind.knowledge.document.application;
+package com.opsmind.knowledge.document.application; // 包作用：应用层，编排业务步骤，但不绑定具体数据库或模型厂商。
 
 import com.opsmind.knowledge.document.config.DocumentProperties;
 import com.opsmind.knowledge.document.domain.DocumentException;
@@ -17,8 +17,8 @@ import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-@Service
-public class DocumentValidationService {
+@Service // 注解作用：把类注册为业务服务，由 Spring 负责创建和注入。
+public class DocumentValidationService { // 类型作用：应用服务，负责组织一个完整业务流程。
 
     private static final Map<String, String> SUPPORTED_TYPES = Map.of(
             "pdf", "application/pdf",
@@ -29,11 +29,11 @@ public class DocumentValidationService {
 
     private final DocumentProperties properties;
 
-    public DocumentValidationService(DocumentProperties properties) {
+    public DocumentValidationService(DocumentProperties properties) { // 方法作用：构造对象并保存依赖；这些依赖通常由 Spring 构造器注入。
         this.properties = properties;
     }
 
-    public ValidatedDocument validate(MultipartFile file) {
+    public ValidatedDocument validate(MultipartFile file) { // 方法作用：检查输入格式、大小和业务约束，非法时抛出明确异常。
         if (file == null || file.isEmpty()) {
             throw error("DOCUMENT_EMPTY", "The uploaded file must not be empty", HttpStatus.BAD_REQUEST);
         }
@@ -54,7 +54,7 @@ public class DocumentValidationService {
         return new ValidatedDocument(filename, extension, mediaType, content, sha256(content));
     }
 
-    private String sanitizeFilename(String originalFilename) {
+    private String sanitizeFilename(String originalFilename) { // 方法作用：完成“sanitizeFilename”对应的内部步骤，供主流程复用。
         if (originalFilename == null || originalFilename.isBlank()) {
             throw error("DOCUMENT_FILENAME_INVALID", "The uploaded file must have a filename", HttpStatus.BAD_REQUEST);
         }
@@ -68,7 +68,7 @@ public class DocumentValidationService {
         return filename;
     }
 
-    private String extensionOf(String filename) {
+    private String extensionOf(String filename) { // 方法作用：完成“extensionOf”对应的内部步骤，供主流程复用。
         int separator = filename.lastIndexOf('.');
         if (separator < 1 || separator == filename.length() - 1) {
             return "";
@@ -76,7 +76,7 @@ public class DocumentValidationService {
         return filename.substring(separator + 1).toLowerCase(Locale.ROOT);
     }
 
-    private byte[] readContent(MultipartFile file) {
+    private byte[] readContent(MultipartFile file) { // 方法作用：完成“readContent”对应的内部步骤，供主流程复用。
         try {
             return file.getBytes();
         } catch (IOException exception) {
@@ -85,7 +85,7 @@ public class DocumentValidationService {
         }
     }
 
-    private void validateSignature(String extension, byte[] content) {
+    private void validateSignature(String extension, byte[] content) { // 方法作用：完成“validateSignature”对应的内部步骤，供主流程复用。
         if (extension.equals("pdf") && !startsWith(content, "%PDF-".getBytes())) {
             throw error("DOCUMENT_SIGNATURE_INVALID", "The file content is not a valid PDF", HttpStatus.BAD_REQUEST);
         }
@@ -98,7 +98,7 @@ public class DocumentValidationService {
         }
     }
 
-    private boolean startsWith(byte[] content, byte[] signature) {
+    private boolean startsWith(byte[] content, byte[] signature) { // 方法作用：完成“startsWith”对应的内部步骤，供主流程复用。
         if (content.length < signature.length) {
             return false;
         }
@@ -110,7 +110,7 @@ public class DocumentValidationService {
         return true;
     }
 
-    private boolean isDocx(byte[] content) {
+    private boolean isDocx(byte[] content) { // 方法作用：判断当前数据或状态是否满足指定条件。
         boolean contentTypesFound = false;
         boolean documentXmlFound = false;
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(content))) {
@@ -128,7 +128,7 @@ public class DocumentValidationService {
         return false;
     }
 
-    private boolean containsNullByte(byte[] content) {
+    private boolean containsNullByte(byte[] content) { // 方法作用：完成“containsNullByte”对应的内部步骤，供主流程复用。
         for (byte value : content) {
             if (value == 0) {
                 return true;
@@ -137,7 +137,7 @@ public class DocumentValidationService {
         return false;
     }
 
-    private String sha256(byte[] content) {
+    private String sha256(byte[] content) { // 方法作用：完成“sha256”对应的内部步骤，供主流程复用。
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
         } catch (NoSuchAlgorithmException exception) {
@@ -145,7 +145,7 @@ public class DocumentValidationService {
         }
     }
 
-    private DocumentException error(String code, String message, HttpStatus status) {
+    private DocumentException error(String code, String message, HttpStatus status) { // 方法作用：完成“error”对应的内部步骤，供主流程复用。
         return new DocumentException(code, message, status);
     }
 }
